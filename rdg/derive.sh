@@ -102,7 +102,11 @@ if [ -n "$service_name" ]; then
   if [ ! -f "$services" ]; then
     warn "$services_rel not found, skipping the database key"
   else
-    service_type="$(yq -r ".\"$service_name\".type // \"\"" "$services")"
+    # strenv, not string concatenation into the expression: a service name
+    # containing a double quote would close the yq string early and abort with a
+    # raw yq parse error instead of the "not defined in services.yaml" warning
+    # this code is written to give.
+    service_type="$(service_name="$service_name" yq -r '.[strenv(service_name)].type // ""' "$services")"
     case "$service_type" in
       mariadb:*)      db_type="mariadb";  db_version="${service_type#mariadb:}" ;;
       mysql:*)        db_type="mysql";    db_version="${service_type#mysql:}" ;;

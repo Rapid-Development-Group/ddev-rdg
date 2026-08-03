@@ -4,8 +4,11 @@
 # Uses only shasum, so the host needs no yq.
 
 # rdg_source_hash <project-root> <rel-path>...
-# Hashes a manifest of "path <sha-or-MISSING>" lines rather than concatenated
-# contents, so a file appearing or disappearing changes the digest.
+# Hashes a manifest of NUL-separated path/sha-or-MISSING pairs rather than
+# concatenated contents, so a file appearing or disappearing changes the digest.
+# NUL rather than a space or newline is what makes the manifest unforgeable: a
+# path may contain either of those, but not a NUL, so no crafted path can imitate
+# the boundary between two entries.
 rdg_source_hash() {
   local root="${1%/}"; shift
   local rel

@@ -3,10 +3,41 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   FIXTURES="$REPO_ROOT/tests/fixtures"
+  EXPECTED="$REPO_ROOT/tests/expected"
 }
 
 derive() { bash "$REPO_ROOT/rdg/derive.sh" "$1" 2>/dev/null; }
 value_of() { derive "$1" | yq -r "$2"; }
+
+# Diffs the whole generated file against a committed golden. The per-key
+# assertions below say what each value should be and why; this says that nothing
+# ELSE changed. It is what catches a regression in a line no assertion names --
+# the daemon's command string, the exposed ports, the header format -- rather than
+# waiting for someone to notice and add the missing assertion afterwards.
+#
+# To update a golden after a deliberate change:
+#   bash rdg/derive.sh tests/fixtures/<f> 2>/dev/null > tests/expected/<f>.config.platformsh.yaml
+golden() {
+  local fixture="$1"
+  derive "$FIXTURES/$fixture" > "$BATS_TEST_TMPDIR/actual"
+  diff -u "$EXPECTED/$fixture.config.platformsh.yaml" "$BATS_TEST_TMPDIR/actual"
+}
+
+@test "golden: composable subdir generates exactly the committed expected output" {
+  golden composable-subdir
+}
+
+@test "golden: classic root generates exactly the committed expected output" {
+  golden classic-root
+}
+
+@test "golden: no theme build generates exactly the committed expected output" {
+  golden no-theme
+}
+
+@test "golden: vite theme generates exactly the committed expected output" {
+  golden vite-theme
+}
 
 @test "composable subdir: php version comes from stack.runtimes" {
   [ "$(value_of "$FIXTURES/composable-subdir" '.php_version')" = "8.3" ]
@@ -113,6 +144,24 @@ value_of() { derive "$1" | yq -r "$2"; }
   [ "$(value_of "$p" '.database')" = "null" ]
 }
 
+@test "a service name containing a double quote resolves instead of aborting with a yq error" {
+  # The service name is interpolated into a yq expression. Concatenating it into
+  # the expression string lets a quote close the yq string early, so the whole
+  # derivation dies on a raw yq parse error rather than reaching any of the
+  # warnings this script is written to give. strenv() keeps it out of the syntax.
+  local p="$BATS_TEST_TMPDIR/quoted-service"
+  mkdir -p "$p/.platform"
+  printf 'type: "php:8.3"\nrelationships:\n  database: %s\nweb:\n  locations:\n    "/":\n      root: "web"\n' \
+    "'db\"x:mysql'" > "$p/.platform.app.yaml"
+  printf "'db\"x':\n  type: mariadb:10.11\n" > "$p/.platform/services.yaml"
+
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  if printf '%s' "$output" | grep -qiF 'invalid input text'; then false; fi
+  [ "$(value_of "$p" '.database.type')" = "mariadb" ]
+  [ "$(value_of "$p" '.database.version')" = "10.11" ]
+}
+
 @test "an unsupported database version warns but still emits the database key" {
   local p="$BATS_TEST_TMPDIR/unsupported-version"
   mkdir -p "$p/.platform"
@@ -138,6 +187,19 @@ value_of() { derive "$1" | yq -r "$2"; }
   [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].directory')" = "/var/www/html/drupal/web" ]
 }
 
+@test "the daemon command names the script install.yaml actually installs" {
+  # The only coupling point between derive.sh and where the add-on puts
+  # theme-watch.sh. /mnt/ddev_config is the project's .ddev directory, and
+  # install.yaml ships rdg/ into it, so resolve the emitted path back to this repo
+  # and require the file to be there. A path that does not resolve gives a daemon
+  # that crash-loops with "No such file or directory" 15 times and then gives up.
+  local cmd rel
+  cmd="$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].command')"
+  [ "$cmd" = "bash /mnt/ddev_config/rdg/theme-watch.sh" ]
+  rel="${cmd#bash /mnt/ddev_config/}"
+  [ -f "$REPO_ROOT/$rel" ]
+}
+
 @test "webpack-family theme gets the livereload port" {
   [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_exposed_ports[0].container_port')" = "35729" ]
   [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_exposed_ports[0].name')" = "theme-devserver" ]
@@ -145,6 +207,31 @@ value_of() { derive "$1" | yq -r "$2"; }
 
 @test "vite theme gets vite's port instead" {
   [ "$(value_of "$FIXTURES/vite-theme" '.web_extra_exposed_ports[0].container_port')" = "5173" ]
+}
+
+@test "the exposed http and https ports differ, and neither is left unset" {
+  # DDEV rejects the project outright with a dedicated error when they match:
+  # "the <name> project has the same 'http_port: N' and 'https_port: N' for
+  # 'name: X' in web_extra_exposed_ports". Deriving all three from one number
+  # makes that an easy mistake to make.
+  local out http https container
+  out="$(derive "$FIXTURES/composable-subdir")"
+  container="$(printf '%s\n' "$out" | yq -r '.web_extra_exposed_ports[0].container_port')"
+  http="$(printf '%s\n' "$out" | yq -r '.web_extra_exposed_ports[0].http_port')"
+  https="$(printf '%s\n' "$out" | yq -r '.web_extra_exposed_ports[0].https_port')"
+  [ "$container" = "35729" ]
+  [ "$http" = "35728" ]
+  [ "$https" = "35729" ]
+  [ "$http" != "$https" ]
+}
+
+@test "the vite port pair differs too, not just the default one" {
+  local http https
+  http="$(value_of "$FIXTURES/vite-theme" '.web_extra_exposed_ports[0].http_port')"
+  https="$(value_of "$FIXTURES/vite-theme" '.web_extra_exposed_ports[0].https_port')"
+  [ "$http" = "5172" ]
+  [ "$https" = "5173" ]
+  [ "$http" != "$https" ]
 }
 
 @test "no package.json means no daemon and no ports" {

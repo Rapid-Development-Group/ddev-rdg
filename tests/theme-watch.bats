@@ -48,10 +48,36 @@ setup() {
 }
 
 @test "the pull provider downloads one mount into DDEV's files dir" {
-  grep -q 'mount=web/sites/default/files' "$REPO_ROOT/providers/platform.yaml"
-  grep -q 'target="\${DDEV_FILES_DIR}"' "$REPO_ROOT/providers/platform.yaml"
-  # Ignore comment lines: the file deliberately quotes the stock command it replaced,
-  # so a whole-file grep would trip on our own explanatory prose. What matters is that
-  # no ACTIVE command uses --all.
-  ! grep -v '^[[:space:]]*#' "$REPO_ROOT/providers/platform.yaml" | grep -q 'mount:download --all'
+  # Every assertion here is scoped to ACTIVE (non-comment) lines. The file
+  # deliberately quotes the stock command it replaced, so a whole-file grep would
+  # be satisfied by our own explanatory prose -- and, before the push commands were
+  # removed, was also satisfied by files_push_command's identical --mount= flag, so
+  # deleting the flag from the live files_import_command passed.
+  local active
+  active="$(grep -v '^[[:space:]]*#' "$REPO_ROOT/providers/platform.yaml")"
+  printf '%s\n' "$active" | grep -q 'mount:download .*--mount=web/sites/default/files'
+  printf '%s\n' "$active" | grep -q 'mount:download .*--target="\${DDEV_FILES_DIR}"'
+  if printf '%s\n' "$active" | grep -q 'mount:download --all'; then false; fi
+}
+
+@test "the pull provider ships no push commands" {
+  # PLATFORM_ENVIRONMENT is pinned across the fleet so that 'ddev pull' reaches the
+  # right environment. That pin turns DDEV's stock push (which derives the
+  # environment from the git branch, and so fails safe) into one that targets
+  # production, so 'ddev push' typed in place of 'ddev pull' would overwrite the
+  # production database and upload local files over production's.
+  local file="$REPO_ROOT/providers/platform.yaml"
+  [ "$(yq -r 'has("db_push_command")' "$file")" = "false" ]
+  [ "$(yq -r 'has("files_push_command")' "$file")" = "false" ]
+  # And no active line uploads anything, however it might be spelled.
+  if grep -v '^[[:space:]]*#' "$file" | grep -q 'mount:upload'; then false; fi
+  if grep -v '^[[:space:]]*#' "$file" | grep -q 'db:sql'; then false; fi
+}
+
+@test "the pull provider still ships the pull half" {
+  local file="$REPO_ROOT/providers/platform.yaml"
+  [ "$(yq -r 'has("info_command")' "$file")" = "true" ]
+  [ "$(yq -r 'has("auth_command")' "$file")" = "true" ]
+  [ "$(yq -r 'has("db_pull_command")' "$file")" = "true" ]
+  [ "$(yq -r 'has("files_import_command")' "$file")" = "true" ]
 }

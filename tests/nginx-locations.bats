@@ -3,7 +3,29 @@
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   FIXTURES="$REPO_ROOT/tests/fixtures"
+  EXPECTED="$REPO_ROOT/tests/expected"
   SCRIPT="$REPO_ROOT/rdg/nginx-locations.sh"
+}
+
+# See the note on golden() in derive.bats. Regenerate with:
+#   bash rdg/nginx-locations.sh tests/fixtures/composable-subdir/drupal/.platform.app.yaml \
+#     drupal/web > tests/expected/composable-subdir.platform-locations.conf
+@test "golden: the generated snippet is exactly the committed expected output" {
+  bash "$SCRIPT" "$FIXTURES/composable-subdir/drupal/.platform.app.yaml" drupal/web \
+    > "$BATS_TEST_TMPDIR/actual"
+  diff -u "$EXPECTED/composable-subdir.platform-locations.conf" "$BATS_TEST_TMPDIR/actual"
+}
+
+@test "each emitted block has a try_files fallback" {
+  # Without it nginx serves the directory listing / 403s instead of index.html,
+  # and every miss under the prefix falls through to Drupal rather than 404ing.
+  local blocks tries
+  blocks="$(bash "$SCRIPT" "$FIXTURES/composable-subdir/drupal/.platform.app.yaml" drupal/web \
+            | grep -c '^location \^~ ')"
+  tries="$(bash "$SCRIPT" "$FIXTURES/composable-subdir/drupal/.platform.app.yaml" drupal/web \
+           | grep -cF 'try_files $uri $uri/index.html =404;')"
+  [ "$blocks" -ge 1 ]
+  [ "$blocks" = "$tries" ]
 }
 
 @test "emits a block for a location outside the docroot" {

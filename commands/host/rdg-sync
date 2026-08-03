@@ -46,12 +46,26 @@ dockerfile="$ddev_dir/web-build/Dockerfile.rdg-theme"
 # Refusing on one of those would send a developer looking for a conflicting block
 # that does not exist. The same anchor is what keeps a commented-out block from
 # counting, since the '#' has to come first.
+#
+# Two things are allowed between column 0 and the key, because both are still a
+# top-level key as far as DDEV's YAML parser is concerned:
+#   - a UTF-8 BOM, which only ever appears before the very first key of a file;
+#   - quotes around the key name ("web_extra_daemons": / 'web_extra_daemons':).
+# Neither is indentation, so admitting them does not reopen the nested-key
+# over-fire that the column-0 anchor exists to prevent.
+bom="$(printf '\357\273\277')"
+
+# config*.y*ml, not config*.yaml: DDEV globs '.ddev/config.*.y*ml', so
+# config.dev.yml is merged exactly like config.dev.yaml. Missing the .yml
+# spelling would let a repo declare the derived keys in a file this check never
+# reads, and the resulting duplicate container_port makes DDEV refuse to load
+# the project at all -- the unrecoverable state this guard exists to prevent.
 conflicts=""
-for candidate in "$ddev_dir"/config*.yaml; do
+for candidate in "$ddev_dir"/config*.y*ml; do
   [ -f "$candidate" ] || continue
   [ "$candidate" = "$generated" ] && continue
   for key in web_extra_daemons web_extra_exposed_ports; do
-    if grep -Eq "^${key}[[:space:]]*:" "$candidate"; then
+    if grep -Eq "^(${bom})?(${key}|\"${key}\"|'${key}')[[:space:]]*:" "$candidate"; then
       conflicts="${conflicts}  ${key} in .ddev/$(basename "$candidate")
 "
     fi
@@ -133,9 +147,12 @@ else
   rm -f "$nginx_conf"
 fi
 
-# A Dockerfile, not webimage_extra_packages: DDEV replaces rather than
-# concatenates list keys when merging config.*.yaml, so writing that key would
-# silently discard packages the repo set for its own reasons.
+# A Dockerfile, not webimage_extra_packages, for isolation rather than safety.
+# DDEV *appends* list keys when merging config.*.yaml (verified: a base [tree]
+# plus a second file's [jq] merges to [tree jq]), so writing that key would not
+# discard packages the repo set for its own reasons. The Dockerfile is used
+# because DDEV reads every web-build/Dockerfile.*, which keeps an add-on-owned
+# file out of a key the repo also edits.
 mkdir -p "$(dirname "$dockerfile")"
 if [ "$needs_theme_toolchain" = "yes" ]; then
   cat > "$dockerfile" <<'EOF'

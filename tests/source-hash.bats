@@ -28,7 +28,7 @@ setup() {
   [ "$a" != "$b" ]
 }
 
-@test "path order does not depend on the filesystem" {
+@test "the digest is order-sensitive, so a reordered path list is a different digest" {
   a="$(rdg_source_hash "$TMP" one.yaml two.json)"
   b="$(rdg_source_hash "$TMP" two.json one.yaml)"
   [ "$a" != "$b" ]

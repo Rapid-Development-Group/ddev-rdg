@@ -1,9 +1,10 @@
 # Platform.sh provider configuration — MAINTAINED BY US, not by DDEV.
 #
 # The generated-marker comment has been removed from this file on purpose so DDEV
-# leaves it alone. The only change from DDEV's stock recipe is files_import_command;
-# see the comment there. To re-diff after a DDEV upgrade, delete this file, run
-# `ddev restart` to regenerate the stock version, then re-apply that one change.
+# leaves it alone. Two changes from DDEV's stock recipe: files_import_command
+# downloads one mount rather than all of them, and the two push commands are gone.
+# See the comments at each. To re-diff after a DDEV upgrade, delete this file, run
+# `ddev restart` to regenerate the stock version, then re-apply both changes.
 #
 # NOTE: Historically this recipe required you to set PLATFORM_PROJECT and PLATFORM_ENVIRONMENT
 # in your project environment. In most cases those values can be derived automatically:
@@ -53,7 +54,8 @@
 #    To pull from a specific environment without permanently changing your project config, use `--environment`:
 #    `ddev pull platform --environment="PLATFORM_ENVIRONMENT=main"`
 #    or with multiple variables: `ddev pull platform --environment="PLATFORM_PROJECT=abc12def34567,PLATFORM_ENVIRONMENT=main,PLATFORM_APP=app,PLATFORM_PRIMARY_RELATIONSHIP=main,PLATFORMSH_CLI_TOKEN=abcdeyourtoken"`
-# 6. Optionally use `ddev push platform` to push local files and database to Upsun. Note that `ddev push` is a command that can potentially damage your production site, so use it against an environment you want to use it against.
+# 6. There is deliberately no `ddev push platform` here. See the comment further down,
+#    where the stock recipe's push commands were removed.
 
 # If you have more than one database on your Upsun Fixed project,
 # you will likely to choose which one you want to use
@@ -160,46 +162,18 @@ files_import_command:
     platform mount:download --yes --quiet --project="${PLATFORM_PROJECT}" --environment="${PLATFORM_ENVIRONMENT}" ${PLATFORM_APP:+"--app=${PLATFORM_APP}"} --mount=web/sites/default/files --target="${DDEV_FILES_DIR}"
 
 
-# push is very useful for non-production environments, but can be
-# very dangerous to production environments. If it is dangerous to your
-# workflow you can remove the lines below and remove the `ddev-generated` in this file
-db_push_command:
-  command: |
-    # set -x   # You can enable bash debugging output by uncommenting
-    set -eu -o pipefail
-    if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .platform/local/project.yaml ]; then
-      PLATFORM_PROJECT="$(yq -r '.id' .platform/local/project.yaml 2>/dev/null || true)"
-      export PLATFORM_PROJECT
-    fi
-
-    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-      PLATFORM_ENVIRONMENT="$(git branch --show-current)"
-      export PLATFORM_ENVIRONMENT
-    fi
-
-    export PLATFORMSH_CLI_NO_INTERACTION=1
-    pushd /var/www/html/.ddev/.downloads >/dev/null;
-    if [ "${PLATFORM_PRIMARY_RELATIONSHIP:-}" != "" ] ; then
-      rel="--relationship ${PLATFORM_PRIMARY_RELATIONSHIP}"
-    fi
-    gzip -dc db.sql.gz | platform db:sql --project="${PLATFORM_PROJECT}" ${rel:-} --environment="${PLATFORM_ENVIRONMENT}" ${PLATFORM_APP:+"--app=${PLATFORM_APP}"}
-
-# push is very useful for non-production environments, but can be
-# very dangerous to production environments. If it is dangerous to your
-# workflow you can remove the lines below and remove the `ddev-generated` in this file
-# TODO: This is a naive, Drupal-centric push, which needs adjustment for the mount to be pushed.
-files_push_command:
-  command: |
-    # set -x   # You can enable bash debugging output by uncommenting
-    set -eu -o pipefail
-    if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .platform/local/project.yaml ]; then
-      PLATFORM_PROJECT="$(yq -r '.id' .platform/local/project.yaml 2>/dev/null || true)"
-      export PLATFORM_PROJECT
-    fi
-
-    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-        export PLATFORM_ENVIRONMENT="$(git branch --show-current)"
-    fi
-
-    export PLATFORMSH_CLI_NO_INTERACTION=1
-    platform mount:upload --yes --quiet --project="${PLATFORM_PROJECT}" --environment="${PLATFORM_ENVIRONMENT}" ${PLATFORM_APP:+"--app=${PLATFORM_APP}"} --source="${DDEV_FILES_DIR}" --mount=web/sites/default/files
+# db_push_command and files_push_command were HERE, and were removed deliberately.
+#
+# DDEV's stock recipe derives PLATFORM_ENVIRONMENT from the current git branch,
+# which is never a real Platform.sh environment name locally, so a stray
+# `ddev push platform` fails safe. Our fleet pins PLATFORM_ENVIRONMENT in
+# .ddev/config.yaml so that `ddev pull` reaches the right environment -- and that
+# pin turns "fails safe" into "targets production". Someone typing `ddev push`
+# when they meant `ddev pull` would overwrite the production database and upload
+# their local files over production's. The tooling this replaced had no push path
+# at all, so shipping one is a capability we would be adding by accident.
+#
+# If you genuinely need push, add these two commands back with an explicit
+# non-production environment (`--environment=PLATFORM_ENVIRONMENT=<env>` on the
+# command line, or a hardcoded non-production value here) rather than inheriting
+# the pinned one. Do not reintroduce them as-is.

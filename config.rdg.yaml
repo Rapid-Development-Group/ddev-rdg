@@ -10,6 +10,13 @@
 # start. Failing loudly is the honest behaviour.
 fail_on_hook_fail: true
 
+# The theme daemon rdg-sync derives runs `yarn`, and the only `yarn` on PATH in
+# ddev-webserver is the corepack shim that this setting creates. Shipping the
+# daemon without its prerequisite gives a daemon that crash-loops 15 times
+# printing "dependency install failed" and names the wrong cause. A scalar, so it
+# overrides cleanly if a repo sets it too -- unlike the list keys rdg-sync emits.
+corepack_enable: true
+
 hooks:
   pre-start:
     - exec-host: "bash .ddev/rdg/check-sync.sh ."
