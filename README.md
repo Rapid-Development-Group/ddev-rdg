@@ -9,6 +9,9 @@ so runtime versions live in exactly one place.
     ddev rdg-sync
     git add .ddev/config.platformsh.yaml && git commit
 
+Note: `ddev add-on remove rdg` leaves `.ddev/providers/platform.yaml` behind
+intentionally (it cannot be auto-deleted). Delete it by hand if unwanted.
+
 ## Usage
 
 Edit `.platform.app.yaml`, then run `ddev rdg-sync` and commit the result. A

@@ -11,4 +11,5 @@ project_files:
 post_install_actions:
   - |
     #ddev-nodisplay
-    chmod +x .ddev/rdg/*.sh .ddev/commands/web/rdg-sync 2>/dev/null || true
+    [ -e rdg/*.sh ] && chmod +x rdg/*.sh
+    chmod +x commands/web/rdg-sync
