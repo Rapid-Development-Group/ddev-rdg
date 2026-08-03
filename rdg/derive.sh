@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#ddev-generated
 # Derives DDEV config from Platform.sh config. Pure: reads a project root,
 # writes YAML to stdout. Warnings and notes go to stderr.
 set -euo pipefail

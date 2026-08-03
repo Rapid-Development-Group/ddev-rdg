@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#ddev-generated
 # Shared by rdg-sync (in the container) and check-sync.sh (on the host).
 # Uses only shasum, so the host needs no yq.
 

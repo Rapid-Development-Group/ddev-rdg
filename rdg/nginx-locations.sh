@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#ddev-generated
 # Generates nginx location blocks for web.locations that live outside the
 # docroot. Prints nothing when there are none.
 set -euo pipefail
