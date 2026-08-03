@@ -3,16 +3,6 @@
 Derives DDEV configuration from `.platform.app.yaml` and `.platform/services.yaml`,
 so runtime versions live in exactly one place.
 
-> **Not ready for use yet — no release has been tagged.**
->
-> `rdg/theme-watch.sh` does not exist yet, but the generated config already declares a
-> daemon that runs it, so installing from this branch and restarting leaves a
-> crash-looping daemon. `ddev add-on get` resolves to the latest *release*, so there is
-> nothing to install by accident until the first tag lands.
->
-> Remaining before v1.0.0: the theme watcher and pull provider, and an end-to-end
-> verification against the pilot project.
-
 ## Install
 
     ddev add-on get Rapid-Development-Group/ddev-rdg
@@ -25,7 +15,19 @@ intentionally (it cannot be auto-deleted). Delete it by hand if unwanted.
 ## Usage
 
 Edit `.platform.app.yaml`, then run `ddev rdg-sync` and commit the result. A
-`pre-start` hook refuses to start the project if the two have drifted.
+`pre-start` hook refuses to start the project if the two have drifted, and prints
+both recovery paths — including `ddev start --skip-hooks` for when the project is
+down and `rdg-sync` therefore cannot reach the container.
+
+If the repo already declares `web_extra_daemons` or `web_extra_exposed_ports` by
+hand, `rdg-sync` refuses to run and names them: DDEV *appends* list keys when
+merging `.ddev/config*.yaml`, so a hand-written block would survive alongside the
+derived one and DDEV would reject the project for a duplicate `container_port`.
+Delete those blocks first.
+
+Commit the add-on's own files alongside the generated ones, as you would for any
+DDEV add-on. A clone that has `config.platformsh.yaml` but not `rdg/theme-watch.sh`
+will crash-loop the theme daemon.
 
 ## What it derives
 
