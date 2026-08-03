@@ -6,10 +6,10 @@ project_files:
   - rdg/
   - config.rdg.yaml
   - providers/platform.yaml
-  - commands/web/rdg-sync
+  - commands/host/rdg-sync
 
 post_install_actions:
   - |
     #ddev-nodisplay
     for f in rdg/*.sh; do [ -e "$f" ] && chmod +x "$f"; done
-    chmod +x commands/web/rdg-sync
+    chmod +x commands/host/rdg-sync

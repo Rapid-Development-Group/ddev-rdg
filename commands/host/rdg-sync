@@ -7,11 +7,15 @@
 
 set -euo pipefail
 
-project_root="/var/www/html"
-
-# NOT /mnt/ddev_config. DDEV bind-mounts that path READ-ONLY, so a command running
-# in the web container cannot write there. The same directory is reachable
-# read-write through the project mount, because .ddev lives inside the project root.
+# A host command, not a web command: /mnt/ddev_config is bind-mounted READ-ONLY
+# in the web container, and the alternative -- the read-write project mount at
+# /var/www/html/.ddev -- is Mutagen-synced, so a write there can take several
+# seconds to become visible on the host. Neither lets 'ddev rdg-sync && git add'
+# work reliably. Running on the host instead means every write below lands
+# directly on the real filesystem, visible to git immediately. yq/jq still only
+# ever run inside the web container, via 'ddev exec' -- this script never
+# requires either on the host.
+project_root="${DDEV_APPROOT:?must be run through ddev}"
 ddev_dir="$project_root/.ddev"
 rdg_dir="$ddev_dir/rdg"
 
@@ -20,19 +24,23 @@ nginx_conf="$ddev_dir/nginx/platform-locations.conf"
 dockerfile="$ddev_dir/web-build/Dockerfile.rdg-theme"
 
 # derive.sh writes warnings to stderr, which we want the user to see, and YAML to
-# stdout, which we capture. A non-zero exit means nothing gets written.
-config="$(bash "$rdg_dir/derive.sh" "$project_root")"
+# stdout, which we capture. 'ddev exec' preserves that split: only stdout is
+# captured here, and derive.sh's stderr passes straight through to the user's
+# terminal. A non-zero exit means nothing gets written. /mnt/ddev_config is fine
+# to READ from inside the container -- it is only writing there that is blocked.
+config="$(ddev exec bash /mnt/ddev_config/rdg/derive.sh /var/www/html)"
 
 printf '%s\n' "$config" > "$generated"
 echo "Wrote $(basename "$generated")"
 
 # --- nginx locations --------------------------------------------------------
+# No yq on the host: this line is plain enough for sed.
 app_config_rel="$(printf '%s' "$config" | sed -n 's/^# source-files: \([^ ]*\).*/\1/p')"
-docroot="$(printf '%s' "$config" | yq -r '.docroot // ""')"
+docroot="$(printf '%s' "$config" | sed -n 's/^docroot: *//p' | head -1)"
 
 mkdir -p "$(dirname "$nginx_conf")"
 if [ -n "$docroot" ]; then
-  locations="$(bash "$rdg_dir/nginx-locations.sh" "$project_root/$app_config_rel" "$docroot")"
+  locations="$(ddev exec bash /mnt/ddev_config/rdg/nginx-locations.sh "/var/www/html/$app_config_rel" "$docroot")"
   if [ -n "$locations" ]; then
     printf '%s\n' "$locations" > "$nginx_conf"
     echo "Wrote nginx/$(basename "$nginx_conf")"
@@ -65,18 +73,21 @@ fi
 # --- verify declared PHP extensions are actually loaded ---------------------
 # Deliberately a check, not a config write. Deriving `php<ver>-<ext>` packages
 # adds redundancy -- DDEV's image already ships redis and apcu -- and risks a
-# package name that does not exist.
+# package name that does not exist. Both the declared list and the loaded list
+# come from inside the container; only the comparison happens on the host.
 declared_extensions="$(
-  yq -r '
+  ddev exec yq -r '
     (.runtime.extensions // [])
     + ( [ .stack.runtimes[]? | select(tag == "!!map") | to_entries[0].value.extensions // [] ] | flatten )
     | .[]
-  ' "$project_root/$app_config_rel" 2>/dev/null | sort -u
+  ' "/var/www/html/$app_config_rel" 2>/dev/null | sort -u
 )"
+
+loaded_extensions="$(ddev exec php -m 2>/dev/null)"
 
 missing=""
 for extension in $declared_extensions; do
-  php -m | grep -qix "$extension" || missing="$missing $extension"
+  printf '%s\n' "$loaded_extensions" | grep -qix "$extension" || missing="$missing $extension"
 done
 if [ -n "$missing" ]; then
   echo "WARNING: declared in $app_config_rel but not loaded in the web container:$missing" >&2
