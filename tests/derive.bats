@@ -177,3 +177,53 @@ value_of() { derive "$1" | yq -r "$2"; }
 @test "nothing in the generated output mentions webpack" {
   ! derive "$FIXTURES/composable-subdir" | grep -qi webpack
 }
+
+@test "a malformed package.json warns honestly and does not block other keys" {
+  local p="$BATS_TEST_TMPDIR/malformed"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{ this is not valid json ' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "web/package.json"
+  printf '%s' "$output" | grep -qF "not valid JSON"
+  # It must be the honest diagnosis, not the "no start script" false positive.
+  if printf '%s' "$output" | grep -qF "no 'start' script"; then false; fi
+  [ "$(value_of "$p" '.php_version')" = "8.3" ]
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+}
+
+@test "malformed package.json does not leak jq's raw parse error onto stderr" {
+  local p="$BATS_TEST_TMPDIR/malformed-stderr"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{ this is not valid json ' > "$p/web/package.json"
+  run bash -c "bash '$REPO_ROOT/rdg/derive.sh' '$p' 2>&1 1>/dev/null"
+  [ "$status" -eq 0 ]
+  if printf '%s' "$output" | grep -qF "parse error"; then false; fi
+}
+
+@test "stdout stays valid YAML when package.json is malformed" {
+  local p="$BATS_TEST_TMPDIR/malformed-yaml"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{ this is not valid json ' > "$p/web/package.json"
+  derive "$p" | yq -e '.' > /dev/null
+}
+
+@test "a whitespace-only start script counts as absent" {
+  local p="$BATS_TEST_TMPDIR/blank-start"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{"name":"x","scripts":{"start":"   "}}\n' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "no 'start' script"
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+}

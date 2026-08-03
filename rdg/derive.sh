@@ -160,15 +160,22 @@ package_json_rel=""
 if [ -n "$docroot" ]; then
   package_json_rel="$docroot/package.json"
   if [ -f "$root/$package_json_rel" ]; then
-    if [ -n "$(jq -r '.scripts.start // ""' "$root/$package_json_rel")" ]; then
-      theme_daemon="yes"
-      if [ "$(jq -r '[.dependencies, .devDependencies] | add // {} | has("vite")' "$root/$package_json_rel")" = "true" ]; then
-        devserver_port="5173"
-      else
-        devserver_port="35729"
-      fi
+    if ! jq empty "$root/$package_json_rel" 2>/dev/null; then
+      warn "$package_json_rel is not valid JSON, not configuring the theme daemon"
     else
-      warn "$package_json_rel has no 'start' script, not configuring the theme daemon"
+      start_script="$(jq -r '.scripts.start // ""' "$root/$package_json_rel")"
+      # A whitespace-only script is not a usable command; treat it as absent.
+      start_script="$(printf '%s' "$start_script" | tr -d '[:space:]')"
+      if [ -n "$start_script" ]; then
+        theme_daemon="yes"
+        if [ "$(jq -r '[.dependencies, .devDependencies] | add // {} | has("vite")' "$root/$package_json_rel")" = "true" ]; then
+          devserver_port="5173"
+        else
+          devserver_port="35729"
+        fi
+      else
+        warn "$package_json_rel has no 'start' script, not configuring the theme daemon"
+      fi
     fi
   fi
 fi
