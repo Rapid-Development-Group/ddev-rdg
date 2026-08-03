@@ -23,6 +23,51 @@ generated="$ddev_dir/config.platformsh.yaml"
 nginx_conf="$ddev_dir/nginx/platform-locations.conf"
 dockerfile="$ddev_dir/web-build/Dockerfile.rdg-theme"
 
+# --- pre-flight: the repo must not declare these two keys itself -------------
+# DDEV APPENDS list keys when it merges .ddev/config*.yaml; it does not replace
+# them. So a hand-written web_extra_daemons / web_extra_exposed_ports block does
+# not get overridden by the one derived below -- the two coexist, and if both
+# claim the same container_port DDEV refuses to load the project at all. Every
+# later 'ddev' command, 'ddev describe' included, then fails. Writing the file
+# and reporting success would leave the project unusable, so refuse up front and
+# write nothing. Gathering before writing does not help here: the conflict is in
+# the two files' content coexisting on disk, not in write ordering.
+#
+# These are the only two list keys this command emits; every other key it writes
+# is a scalar, and scalars do override cleanly. So the check does not need to be
+# general.
+#
+# grep, not yq: end users must need no tooling on the host, and this has to work
+# when the project is stopped, which rules out 'ddev exec'. Requiring the key to
+# follow only whitespace keeps a commented-out block (the state a repo is left in
+# mid-migration) from tripping the check.
+conflicts=""
+for candidate in "$ddev_dir"/config*.yaml; do
+  [ -f "$candidate" ] || continue
+  [ "$candidate" = "$generated" ] && continue
+  for key in web_extra_daemons web_extra_exposed_ports; do
+    if grep -Eq "^[[:space:]]*${key}[[:space:]]*:" "$candidate"; then
+      conflicts="${conflicts}  ${key} in .ddev/$(basename "$candidate")
+"
+    fi
+  done
+done
+
+if [ -n "$conflicts" ]; then
+  {
+    echo "rdg-sync: this project still declares these itself:"
+    echo
+    printf '%s' "$conflicts"
+    echo
+    echo "Delete those blocks. 'ddev rdg-sync' now derives the theme daemon and its"
+    echo "exposed ports from .platform.app.yaml, and DDEV appends list keys when it"
+    echo "merges .ddev/config*.yaml instead of replacing them -- so a hand-written block"
+    echo "would survive alongside the derived one and DDEV would reject the project for"
+    echo "a duplicate container_port. Nothing was written."
+  } >&2
+  exit 1
+fi
+
 # Runs one step inside the web container and prints its stdout; stderr passes
 # straight through live, so e.g. derive.sh's own warnings still reach the
 # user's terminal. Writing the generated config can make a repo's OWN existing
