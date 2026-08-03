@@ -227,3 +227,67 @@ value_of() { derive "$1" | yq -r "$2"; }
   [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
   [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
 }
+
+@test "a package.json whose root is a JSON array warns and does not crash the whole derivation" {
+  local p="$BATS_TEST_TMPDIR/root-array"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '["a","b"]' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "not valid JSON"
+  [ -n "$output" ]
+  [ "$(value_of "$p" '.php_version')" = "8.3" ]
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+  derive "$p" | yq -e '.' > /dev/null
+}
+
+@test "a package.json whose root is a JSON string warns and does not crash the whole derivation" {
+  local p="$BATS_TEST_TMPDIR/root-string"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '"hello"' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "not valid JSON"
+  [ -n "$output" ]
+  [ "$(value_of "$p" '.php_version')" = "8.3" ]
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+  derive "$p" | yq -e '.' > /dev/null
+}
+
+@test "a package.json whose root is a JSON number warns and does not crash the whole derivation" {
+  local p="$BATS_TEST_TMPDIR/root-number"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '42' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "not valid JSON"
+  [ -n "$output" ]
+  [ "$(value_of "$p" '.php_version')" = "8.3" ]
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+  derive "$p" | yq -e '.' > /dev/null
+}
+
+@test "a package.json whose root is JSON null warns and does not crash the whole derivation" {
+  local p="$BATS_TEST_TMPDIR/root-null"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf 'null' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF "not valid JSON"
+  [ -n "$output" ]
+  [ "$(value_of "$p" '.php_version')" = "8.3" ]
+  [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
+  derive "$p" | yq -e '.' > /dev/null
+}

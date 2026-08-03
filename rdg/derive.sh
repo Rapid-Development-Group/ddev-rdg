@@ -160,8 +160,8 @@ package_json_rel=""
 if [ -n "$docroot" ]; then
   package_json_rel="$docroot/package.json"
   if [ -f "$root/$package_json_rel" ]; then
-    if ! jq empty "$root/$package_json_rel" 2>/dev/null; then
-      warn "$package_json_rel is not valid JSON, not configuring the theme daemon"
+    if ! jq -e 'type == "object"' "$root/$package_json_rel" >/dev/null 2>&1; then
+      warn "$package_json_rel is not valid JSON or not a JSON object, not configuring the theme daemon"
     else
       start_script="$(jq -r '.scripts.start // ""' "$root/$package_json_rel")"
       # A whitespace-only script is not a usable command; treat it as absent.
