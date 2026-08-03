@@ -7,12 +7,12 @@
 # contents, so a file appearing or disappearing changes the digest.
 rdg_source_hash() {
   local root="${1%/}"; shift
-  local path
-  for path in "$@"; do
-    if [ -f "$root/$path" ]; then
-      printf '%s %s\n' "$path" "$(shasum -a 256 "$root/$path" | cut -d' ' -f1)"
+  local rel
+  for rel in "$@"; do
+    if [ -f "$root/$rel" ]; then
+      printf '%s\0%s\0' "$rel" "$(shasum -a 256 "$root/$rel" | cut -d' ' -f1)"
     else
-      printf '%s MISSING\n' "$path"
+      printf '%s\0MISSING\0' "$rel"
     fi
   done | shasum -a 256 | cut -d' ' -f1
 }
