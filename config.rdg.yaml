@@ -1,2 +1,15 @@
 #ddev-generated
-# placeholder
+# Installed by the ddev-rdg add-on.
+#
+# fail_on_hook_fail makes the pre-start guard authoritative: a project whose
+# DDEV config has drifted from its Platform.sh config refuses to start rather
+# than starting on stale values.
+#
+# The guard cannot fix the drift itself. A pre-start hook runs AFTER DDEV has
+# parsed the config files, so anything it writes only takes effect on the next
+# start. Failing loudly is the honest behaviour.
+fail_on_hook_fail: true
+
+hooks:
+  pre-start:
+    - exec-host: "bash .ddev/rdg/check-sync.sh ."
