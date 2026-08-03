@@ -26,6 +26,13 @@ export CHOKIDAR_INTERVAL=1000
 # compiled out. Harmless once those dependencies are gone.
 export CPPFLAGS="-DPNG_ARM_NEON_OPT=0"
 
-yarn --network-concurrency 1
+# Gated explicitly rather than a blanket `set -e`: without this, a failed install
+# (network blip, lockfile conflict, corrupt node_modules) falls straight through to
+# the start command below, and DDEV's crash-loop restart (up to 15 retries) re-attempts
+# a doomed start on top of it, burying the real install failure in the same log stream.
+yarn --network-concurrency 1 || { echo "theme-watch: dependency install failed" >&2; exit 1; }
 
+# exec, not a bare invocation: replaces this shell with the start process so DDEV's
+# process supervisor can signal it directly, rather than a wrapper shell that could
+# swallow the signal.
 exec yarn start
