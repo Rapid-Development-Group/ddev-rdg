@@ -194,6 +194,24 @@ fi
 # --- emit -------------------------------------------------------------------
 hash_paths=("$app_config_rel" "$services_rel")
 [ -n "$package_json_rel" ] && hash_paths+=("$package_json_rel")
+
+# The '# source-files:' header below is space-separated, and check-sync.sh
+# (the host guard) splits it back into paths with word-splitting -- it has no
+# yq and cannot parse a quoted/escaped list. A path containing whitespace
+# (e.g. a docroot like "my app/web") would silently split into more paths than
+# were actually hashed, so the guard's re-hash could never match what was
+# written here, even immediately after a correct sync: a permanent, falsely
+# diagnosed "config has changed" block that 'ddev rdg-sync' cannot fix, because
+# it would just regenerate the same unparseable header. Refuse here instead,
+# where the ambiguity is created and an accurate message is still possible.
+for hash_path in "${hash_paths[@]}"; do
+  case "$hash_path" in
+    *[[:space:]]*)
+      die "path '$hash_path' contains whitespace, which the '# source-files:' header cannot represent (it is space-separated); rename the file or directory to remove the space"
+      ;;
+  esac
+done
+
 source_hash="$(rdg_source_hash "$root" "${hash_paths[@]}")"
 
 cat <<EOF

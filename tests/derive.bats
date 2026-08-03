@@ -178,6 +178,19 @@ value_of() { derive "$1" | yq -r "$2"; }
   ! derive "$FIXTURES/composable-subdir" | grep -qi webpack
 }
 
+@test "a docroot containing a space is refused, not silently mis-hashed" {
+  local p="$BATS_TEST_TMPDIR/space-docroot"
+  mkdir -p "$p/.platform"
+  printf 'type: "php:8.2"\nweb:\n  locations:\n    "/":\n      root: "my app/web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -ne 0 ]
+  # grep, not [[ ]] — see the Global Constraint on bats assertions.
+  printf '%s' "$output" | grep -qF "my app/web/package.json"
+  ! printf '%s' "$output" | grep -q '^# source-files:'
+}
+
 @test "a malformed package.json warns honestly and does not block other keys" {
   local p="$BATS_TEST_TMPDIR/malformed"
   mkdir -p "$p/.platform" "$p/web"
