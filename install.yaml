@@ -1,0 +1,14 @@
+name: rdg
+
+ddev_version_constraint: '>= 1.24.8'
+
+project_files:
+  - rdg/
+  - config.rdg.yaml
+  - providers/platform.yaml
+  - commands/web/rdg-sync
+
+post_install_actions:
+  - |
+    #ddev-nodisplay
+    chmod +x .ddev/rdg/*.sh .ddev/commands/web/rdg-sync 2>/dev/null || true
