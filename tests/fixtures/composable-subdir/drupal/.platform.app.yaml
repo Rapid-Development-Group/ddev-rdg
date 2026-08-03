@@ -1,0 +1,30 @@
+name: "drupal"
+type: "composable:25.11"
+stack:
+  runtimes:
+    - "php@8.3":
+        extensions:
+          - redis
+          - apcu
+    - "nodejs@20"
+relationships:
+  database: "mysqldb:mysql"
+  redis: "rediscache:redis"
+web:
+  locations:
+    "/":
+      root: "web"
+      passthru: "/index.php"
+    "/sites/default/files":
+      root: "web/sites/default/files"
+      allow: true
+    "/drupal-integrations":
+      root: "landing-pages/drupal-integrations"
+      index:
+        - "index.html"
+crons:
+  drupal:
+    spec: "0 * * * *"
+    cmd: "cd web && drush core-cron"
+mounts:
+  "/web/sites/default/files": "shared:files/files"
