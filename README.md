@@ -3,9 +3,19 @@
 Derives DDEV configuration from `.platform.app.yaml` and `.platform/services.yaml`,
 so runtime versions live in exactly one place.
 
+> **Not ready for use yet — no release has been tagged.**
+>
+> `rdg/theme-watch.sh` does not exist yet, but the generated config already declares a
+> daemon that runs it, so installing from this branch and restarting leaves a
+> crash-looping daemon. `ddev add-on get` resolves to the latest *release*, so there is
+> nothing to install by accident until the first tag lands.
+>
+> Remaining before v1.0.0: the theme watcher and pull provider, and an end-to-end
+> verification against the pilot project.
+
 ## Install
 
-    ddev add-on get rapiddg/ddev-rdg
+    ddev add-on get Rapid-Development-Group/ddev-rdg
     ddev rdg-sync
     git add .ddev/config.platformsh.yaml && git commit
 
