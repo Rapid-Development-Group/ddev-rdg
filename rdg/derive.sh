@@ -73,23 +73,71 @@ if [ -z "$nodejs_version" ]; then
 fi
 
 # --- database ---------------------------------------------------------------
+# relationships.database has two documented forms: a short scalar
+# ("mysqldb:mysql") or an extended map ({service: mysqldb, endpoint: mysql}).
+# The tag must be checked before picking apart the value: naively slicing the
+# map's rendered text on ':' pulls out "service" (or "{service") instead of
+# the actual service name.
 db_type=""; db_version=""
-relationship="$(yq -r '.relationships.database // ""' "$app_config")"
-if [ -z "$relationship" ]; then
-  warn "no 'database' relationship declared, skipping the database key"
-elif [ ! -f "$services" ]; then
-  warn "$services_rel not found, skipping the database key"
-else
-  service_name="${relationship%%:*}"
-  service_type="$(yq -r ".\"$service_name\".type // \"\"" "$services")"
-  case "$service_type" in
-    mariadb:*)      db_type="mariadb";  db_version="${service_type#mariadb:}" ;;
-    mysql:*)        db_type="mysql";    db_version="${service_type#mysql:}" ;;
-    oracle-mysql:*) db_type="mysql";    db_version="${service_type#oracle-mysql:}" ;;
-    postgresql:*)   db_type="postgres"; db_version="${service_type#postgresql:}" ;;
-    "")             warn "service '$service_name' is not defined in $services_rel" ;;
-    *)              warn "unrecognised database service type '$service_type'" ;;
-  esac
+service_name=""
+rel_tag="$(yq -r '.relationships.database | tag' "$app_config")"
+case "$rel_tag" in
+  '!!null')
+    warn "no 'database' relationship declared, skipping the database key"
+    ;;
+  '!!map')
+    service_name="$(yq -r '.relationships.database.service // ""' "$app_config")"
+    if [ -z "$service_name" ]; then
+      warn "'database' relationship is a malformed map (no 'service' key) in $app_config_rel, skipping the database key"
+    fi
+    ;;
+  *)
+    relationship="$(yq -r '.relationships.database // ""' "$app_config")"
+    service_name="${relationship%%:*}"
+    ;;
+esac
+
+if [ -n "$service_name" ]; then
+  if [ ! -f "$services" ]; then
+    warn "$services_rel not found, skipping the database key"
+  else
+    service_type="$(yq -r ".\"$service_name\".type // \"\"" "$services")"
+    case "$service_type" in
+      mariadb:*)      db_type="mariadb";  db_version="${service_type#mariadb:}" ;;
+      mysql:*)        db_type="mysql";    db_version="${service_type#mysql:}" ;;
+      oracle-mysql:*) db_type="mysql";    db_version="${service_type#oracle-mysql:}" ;;
+      postgresql:*)   db_type="postgres"; db_version="${service_type#postgresql:}" ;;
+      "")             warn "service '$service_name' is not defined in $services_rel" ;;
+      *)              warn "unrecognised database service type '$service_type'" ;;
+    esac
+
+    # Snapshot of versions DDEV v1.25.3 supports, per
+    # https://ddev.readthedocs.io/en/stable/users/extend/database-types/ —
+    # refresh this list when DDEV's supported matrix changes. Unsupported
+    # versions only get a warning, never a failure: a future DDEV release
+    # adding versions must not block anyone.
+    if [ -n "$db_type" ]; then
+      supported=0
+      case "$db_type" in
+        mariadb)
+          case "$db_version" in
+            5.5|10.0|10.1|10.2|10.3|10.4|10.5|10.6|10.7|10.8|10.11|11.4|11.8|12.3) supported=1 ;;
+          esac
+          ;;
+        mysql)
+          case "$db_version" in
+            5.5|5.6|5.7|8.0|8.4) supported=1 ;;
+          esac
+          ;;
+        postgres)
+          case "$db_version" in
+            9|10|11|12|13|14|15|16|17|18) supported=1 ;;
+          esac
+          ;;
+      esac
+      [ "$supported" -eq 1 ] || warn "$db_type $db_version (service '$service_name' in $services_rel) is not a version DDEV v1.25.x supports; ddev start will reject it"
+    fi
+  fi
 fi
 
 # --- docroot ----------------------------------------------------------------
