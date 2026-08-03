@@ -1,0 +1,11 @@
+{
+  "name": "libraries-custom",
+  "private": true,
+  "scripts": {
+    "start": "yarn webpack watch -c ./node_modules/rdg-webpack/webpack.config.js",
+    "build": "yarn webpack build -c ./node_modules/rdg-webpack/webpack.config.js"
+  },
+  "dependencies": {
+    "rdg-webpack": "https://example.invalid/rdg-webpack"
+  }
+}

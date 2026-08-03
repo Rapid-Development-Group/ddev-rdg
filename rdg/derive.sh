@@ -149,6 +149,30 @@ else
   warn 'no web.locations."/".root declared, skipping the docroot key'
 fi
 
+# --- theme asset build ------------------------------------------------------
+# A theme asset build is standard in our Drupal projects. Deliberately
+# bundler-agnostic: we run the repo's own 'yarn start', so switching webpack to
+# Vite needs no change here. The port is the only bundler-specific value, and it
+# is derived rather than assumed.
+theme_daemon="no"
+devserver_port=""
+package_json_rel=""
+if [ -n "$docroot" ]; then
+  package_json_rel="$docroot/package.json"
+  if [ -f "$root/$package_json_rel" ]; then
+    if [ -n "$(jq -r '.scripts.start // ""' "$root/$package_json_rel")" ]; then
+      theme_daemon="yes"
+      if [ "$(jq -r '[.dependencies, .devDependencies] | add // {} | has("vite")' "$root/$package_json_rel")" = "true" ]; then
+        devserver_port="5173"
+      else
+        devserver_port="35729"
+      fi
+    else
+      warn "$package_json_rel has no 'start' script, not configuring the theme daemon"
+    fi
+  fi
+fi
+
 # --- what we deliberately do not translate ----------------------------------
 for section in crons mounts workers; do
   if [ "$(yq -r ".$section // \"\" | length" "$app_config")" != "0" ]; then
@@ -161,6 +185,7 @@ fi
 
 # --- emit -------------------------------------------------------------------
 hash_paths=("$app_config_rel" "$services_rel")
+[ -n "$package_json_rel" ] && hash_paths+=("$package_json_rel")
 source_hash="$(rdg_source_hash "$root" "${hash_paths[@]}")"
 
 cat <<EOF
@@ -170,6 +195,7 @@ cat <<EOF
 # source-files: ${hash_paths[*]}
 # source-sha256: $source_hash
 EOF
+printf '# needs-theme-toolchain: %s\n' "$theme_daemon"
 
 [ -n "$php_version" ]    && printf 'php_version: "%s"\n' "$php_version"
 [ -n "$nodejs_version" ] && printf 'nodejs_version: "%s"\n' "$nodejs_version"
@@ -178,6 +204,20 @@ EOF
 
 if [ -n "$db_type" ]; then
   printf 'database:\n    type: %s\n    version: "%s"\n' "$db_type" "$db_version"
+fi
+
+if [ "$theme_daemon" = "yes" ]; then
+  cat <<EOF
+web_extra_daemons:
+    - name: theme
+      command: "bash /mnt/ddev_config/rdg/theme-watch.sh"
+      directory: /var/www/html/$docroot
+web_extra_exposed_ports:
+    - name: theme-devserver
+      container_port: $devserver_port
+      http_port: $((devserver_port - 1))
+      https_port: $devserver_port
+EOF
 fi
 
 exit 0

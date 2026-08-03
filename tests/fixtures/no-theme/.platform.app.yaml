@@ -1,0 +1,12 @@
+name: "app"
+type: "composable:25.11"
+stack:
+  runtimes:
+    - "php@8.3"
+relationships:
+  database: "maindb:mysql"
+web:
+  locations:
+    "/":
+      root: "web"
+      passthru: "/index.php"

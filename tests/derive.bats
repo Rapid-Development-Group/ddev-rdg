@@ -132,3 +132,48 @@ value_of() { derive "$1" | yq -r "$2"; }
   run bash "$REPO_ROOT/rdg/derive.sh" "$FIXTURES/composable-subdir"
   if grep -qF "not a version DDEV" <<< "$output"; then false; fi
 }
+
+@test "theme daemon is emitted when the docroot has a start script" {
+  [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].name')" = "theme" ]
+  [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].directory')" = "/var/www/html/drupal/web" ]
+}
+
+@test "webpack-family theme gets the livereload port" {
+  [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_exposed_ports[0].container_port')" = "35729" ]
+  [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_exposed_ports[0].name')" = "theme-devserver" ]
+}
+
+@test "vite theme gets vite's port instead" {
+  [ "$(value_of "$FIXTURES/vite-theme" '.web_extra_exposed_ports[0].container_port')" = "5173" ]
+}
+
+@test "no package.json means no daemon and no ports" {
+  [ "$(value_of "$FIXTURES/no-theme" '.web_extra_daemons')" = "null" ]
+  [ "$(value_of "$FIXTURES/no-theme" '.web_extra_exposed_ports')" = "null" ]
+}
+
+@test "a package.json with no start script warns and emits no daemon" {
+  local p="$BATS_TEST_TMPDIR/nostart"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{"name":"x","scripts":{"build":"vite build"}}\n' > "$p/web/package.json"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$p"
+  [ "$status" -eq 0 ]
+  # grep, not [[ ]] — see the Global Constraint on bats assertions.
+  printf '%s' "$output" | grep -qF "no 'start' script"
+  [ "$(bash "$REPO_ROOT/rdg/derive.sh" "$p" 2>/dev/null | yq -r '.web_extra_daemons')" = "null" ]
+}
+
+@test "the theme toolchain marker is present only with a theme build" {
+  derive "$FIXTURES/composable-subdir" | grep -q '^# needs-theme-toolchain: yes$'
+  derive "$FIXTURES/no-theme" | grep -q '^# needs-theme-toolchain: no$'
+}
+
+@test "package.json is included in the hashed source files" {
+  derive "$FIXTURES/composable-subdir" | grep -q '^# source-files: .*drupal/web/package\.json'
+}
+
+@test "nothing in the generated output mentions webpack" {
+  ! derive "$FIXTURES/composable-subdir" | grep -qi webpack
+}
