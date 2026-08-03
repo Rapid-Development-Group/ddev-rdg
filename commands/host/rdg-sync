@@ -38,15 +38,20 @@ dockerfile="$ddev_dir/web-build/Dockerfile.rdg-theme"
 # general.
 #
 # grep, not yq: end users must need no tooling on the host, and this has to work
-# when the project is stopped, which rules out 'ddev exec'. Requiring the key to
-# follow only whitespace keeps a commented-out block (the state a repo is left in
-# mid-migration) from tripping the check.
+# when the project is stopped, which rules out 'ddev exec'.
+#
+# Anchored at column 0, with no leading whitespace allowed. Only a top-level key
+# is one DDEV merges, so indentation means the match is something else -- a
+# nested mapping, a documentation fragment -- that DDEV loads without complaint.
+# Refusing on one of those would send a developer looking for a conflicting block
+# that does not exist. The same anchor is what keeps a commented-out block from
+# counting, since the '#' has to come first.
 conflicts=""
 for candidate in "$ddev_dir"/config*.yaml; do
   [ -f "$candidate" ] || continue
   [ "$candidate" = "$generated" ] && continue
   for key in web_extra_daemons web_extra_exposed_ports; do
-    if grep -Eq "^[[:space:]]*${key}[[:space:]]*:" "$candidate"; then
+    if grep -Eq "^${key}[[:space:]]*:" "$candidate"; then
       conflicts="${conflicts}  ${key} in .ddev/$(basename "$candidate")
 "
     fi
