@@ -53,7 +53,15 @@ runtimes() {
 }
 
 runtime_version() {
-  runtimes | awk -F@ -v want="$1" '$1 == want { print $2; exit }'
+  # Deliberately no 'exit' after the match. awk exiting early closes the pipe
+  # while yq may still be writing; yq dies of SIGPIPE (141), 'set -o pipefail'
+  # makes that the pipeline's status, and 'set -e' then aborts this whole script
+  # -- emitting a truncated config with no php_version. It hit php specifically:
+  # as the FIRST runtime entry it let awk exit immediately, where nodejs (last)
+  # let yq finish writing first. That asymmetry is why it presented as one flaky
+  # test rather than a bug. Reading the whole list costs nothing at this size.
+  runtimes | awk -F@ -v want="$1" '$1 == want && !found { v = $2; found = 1 }
+                                   END { if (found) print v }'
 }
 
 # --- php --------------------------------------------------------------------

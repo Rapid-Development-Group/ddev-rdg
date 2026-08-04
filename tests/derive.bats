@@ -47,6 +47,35 @@ golden() {
   [ "$(value_of "$FIXTURES/composable-subdir" '.nodejs_version')" = "20" ]
 }
 
+@test "a long runtimes list still derives the first entry: no SIGPIPE abort" {
+  # Regression. runtime_version piped yq into 'awk {print; exit}'. awk exiting on
+  # its first match closed the pipe under yq, yq died of SIGPIPE, pipefail made
+  # that the pipeline's status, and set -e aborted derive.sh -- so php_version
+  # simply vanished from the output. php was what tripped it, being FIRST in the
+  # list; nodejs, last, let yq finish writing. On CI that presented as a single
+  # intermittently failing test rather than a bug.
+  #
+  # The stock fixture's two runtimes are too few to lose the race reliably.
+  # Padding the list keeps yq writing past awk's match, which reproduced the
+  # abort 20/20 against the old code.
+  local proj="$BATS_TEST_TMPDIR/padded"
+  cp -R "$FIXTURES/composable-subdir" "$proj"
+  local cfg="$proj/drupal/.platform.app.yaml" i
+  {
+    printf 'type: "composable:25.11"\nstack:\n  runtimes:\n'
+    printf '    - "php@8.3"\n    - "nodejs@20"\n'
+    for i in $(seq 1 4000); do printf '    - "pad%s@1.0"\n' "$i"; done
+    # Keep the rest of the app config so the whole derivation still runs.
+    sed -n '/^web:/,$p' "$cfg"
+  } > "$cfg.padded"
+  mv "$cfg.padded" "$cfg"
+
+  run bash "$REPO_ROOT/rdg/derive.sh" "$proj"
+  [ "$status" -eq 0 ] || { echo "derive.sh exited $status"; echo "$output"; return 1; }
+  printf '%s\n' "$output" | grep -qx 'php_version: "8.3"'
+  printf '%s\n' "$output" | grep -qx 'nodejs_version: "20"'
+}
+
 @test "composable subdir: docroot is prefixed with the app root" {
   [ "$(value_of "$FIXTURES/composable-subdir" '.docroot')" = "drupal/web" ]
 }

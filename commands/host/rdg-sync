@@ -112,7 +112,11 @@ config="$(run_in_container bash /mnt/ddev_config/rdg/derive.sh /var/www/html)"
 
 # No yq on the host: these lines are plain enough for sed.
 app_config_rel="$(printf '%s' "$config" | sed -n 's/^# source-files: \([^ ]*\).*/\1/p')"
-docroot="$(printf '%s' "$config" | sed -n 's/^docroot: *//p' | head -1)"
+# 'awk NR==1' rather than 'head -1': head exits after its first line, closing the
+# pipe under sed while sed may still be writing. With 'set -o pipefail' that
+# SIGPIPE becomes the pipeline's status and 'set -e' aborts the sync. awk reads to
+# EOF. Same defect class as runtime_version in rdg/derive.sh, which CI caught.
+docroot="$(printf '%s' "$config" | sed -n 's/^docroot: *//p' | awk 'NR == 1')"
 needs_theme_toolchain="no"
 printf '%s' "$config" | grep -q '^# needs-theme-toolchain: yes$' && needs_theme_toolchain="yes"
 
