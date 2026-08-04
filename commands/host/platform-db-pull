@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+#ddev-generated
+## Description: Pull the database from a Platform.sh environment (files untouched)
+## Usage: platform-db-pull [environment]
+## Example: "ddev platform-db-pull" or "ddev platform-db-pull staging"
+
+set -euo pipefail
+
+# Sugar for:
+#   ddev pull platform --skip-files --environment="PLATFORM_ENVIRONMENT=<env>"
+# which is what the tooling this replaced spelled 'platform-db-pull <env>'.
+#
+# DDEV_APPROOT rather than a path relative to BASH_SOURCE: this is a host command,
+# DDEV always sets the variable, and commands/host/rdg-sync already establishes the
+# idiom for locating project files from this directory.
+source "${DDEV_APPROOT:?must be run through ddev}/.ddev/rdg/pull-args.sh"
+
+rdg_pull_parse_env "$(basename "$0")" "$@"
+
+args=(pull platform --skip-files)
+
+# 'if', not '[ -n ... ] && args+=(...)': a failing && list in non-final position
+# exits the script under 'set -e', so the no-argument case would abort here.
+if [ -n "$RDG_PULL_ENV" ]; then
+  args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
+fi
+
+# No -y. DDEV's confirmation is what shows which environment is about to overwrite
+# the local database, and picking the environment is this command's whole purpose.
+#
+# With no argument, no --environment is passed at all -- the environment pinned in
+# the project's own .ddev/config.yaml then applies. Not hardcoded to 'master' here:
+# different repos in the fleet pin different environments.
+exec ddev "${args[@]}"

@@ -36,6 +36,28 @@ by hand if unwanted.
 
 ## Usage
 
+### Pulling from a Platform.sh environment
+
+    ddev platform-db-pull [environment]      # database only
+    ddev platform-files-pull [environment]   # public files only
+
+Sugar for `ddev pull platform --skip-files --environment="PLATFORM_ENVIRONMENT=<env>"`
+and its `--skip-db` counterpart, so choosing an environment costs one word instead of
+sixty characters.
+
+With no argument neither command passes `--environment` at all, so whatever the project
+pins in its own `.ddev/config.yaml` applies — deliberately not hardcoded to `master`,
+since repos pin different environments.
+
+Neither passes `-y`: DDEV's confirmation is what shows which environment is about to
+overwrite local data, and picking the environment is the whole point. Neither takes any
+flags either — for `--skip-import` and friends, use `ddev pull platform` directly.
+
+Note that the provider resumes a paused environment (`platform environment:resume`)
+before pulling from it, which is a change to remote state.
+
+### Keeping the derived config in sync
+
 Edit `.platform.app.yaml`, then run `ddev rdg-sync` and commit the result. A
 `pre-start` hook refuses to start the project if the two have drifted, and prints
 both recovery paths — including `ddev start --skip-hooks` for when the project is

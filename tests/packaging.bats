@@ -58,6 +58,10 @@ shipped_files() {
   local entries
   entries="$(yq -r '.project_files[]' "$INSTALL")"
   printf '%s\n' "$entries" | grep -qx 'commands/host/rdg-sync'
+  # The pull wrappers: shipped but not load-bearing for startup, so their absence
+  # would be silent -- 'ddev platform-db-pull' would just not be a command.
+  printf '%s\n' "$entries" | grep -qx 'commands/host/platform-db-pull'
+  printf '%s\n' "$entries" | grep -qx 'commands/host/platform-files-pull'
   printf '%s\n' "$entries" | grep -qx 'rdg/'
   printf '%s\n' "$entries" | grep -qx 'config.rdg.yaml'
   printf '%s\n' "$entries" | grep -qx 'providers/platform.yaml'
@@ -71,6 +75,25 @@ shipped_files() {
   printf '%s\n' "$shipped" | grep -qF '/rdg/check-sync.sh'
   printf '%s\n' "$shipped" | grep -qF '/rdg/source-hash.sh'
   printf '%s\n' "$shipped" | grep -qF '/rdg/theme-watch.sh'
+  # Sourced by both pull wrappers; ships inside rdg/ rather than as its own entry.
+  printf '%s\n' "$shipped" | grep -qF '/rdg/pull-args.sh'
+}
+
+@test "post_install_actions chmods every host command the add-on ships" {
+  # A non-executable host command is not registered by DDEV at all: it vanishes
+  # from 'ddev -h' with no error, which reads as a broken install rather than a
+  # packaging slip. Derived from project_files so a third command cannot be added
+  # without its chmod.
+  local actions entry
+  actions="$(yq -r '.post_install_actions[]' "$INSTALL")"
+  while IFS= read -r entry; do
+    case "$entry" in
+      commands/host/*)
+        printf '%s\n' "$actions" | grep -qF "chmod +x $entry" \
+          || { echo "project_files has $entry with no matching chmod"; return 1; }
+        ;;
+    esac
+  done < <(yq -r '.project_files[]' "$INSTALL")
 }
 
 @test "fail_on_hook_fail makes the pre-start guard authoritative, not advisory" {

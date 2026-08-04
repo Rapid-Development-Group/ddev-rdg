@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+#ddev-generated
+## Description: Pull the public files from a Platform.sh environment (database untouched)
+## Usage: platform-files-pull [environment]
+## Example: "ddev platform-files-pull" or "ddev platform-files-pull staging"
+
+set -euo pipefail
+
+# The files half of platform-db-pull, same ergonomics. Sugar for:
+#   ddev pull platform --skip-db --environment="PLATFORM_ENVIRONMENT=<env>"
+# The provider's files_import_command downloads the one mount that matters
+# (web/sites/default/files) into $DDEV_FILES_DIR.
+source "${DDEV_APPROOT:?must be run through ddev}/.ddev/rdg/pull-args.sh"
+
+rdg_pull_parse_env "$(basename "$0")" "$@"
+
+args=(pull platform --skip-db)
+
+# 'if', not '[ -n ... ] && args+=(...)': a failing && list in non-final position
+# exits the script under 'set -e', so the no-argument case would abort here.
+if [ -n "$RDG_PULL_ENV" ]; then
+  args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
+fi
+
+# No -y, and no --environment when no argument was given. See platform-db-pull.
+exec ddev "${args[@]}"
