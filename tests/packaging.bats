@@ -59,9 +59,9 @@ shipped_files() {
   entries="$(yq -r '.project_files[]' "$INSTALL")"
   printf '%s\n' "$entries" | grep -qx 'commands/host/rdg-sync'
   # The pull wrappers: shipped but not load-bearing for startup, so their absence
-  # would be silent -- 'ddev platform-db-pull' would just not be a command.
-  printf '%s\n' "$entries" | grep -qx 'commands/host/platform-db-pull'
-  printf '%s\n' "$entries" | grep -qx 'commands/host/platform-files-pull'
+  # would be silent -- 'ddev upsun-db-pull' would just not be a command.
+  printf '%s\n' "$entries" | grep -qx 'commands/host/upsun-db-pull'
+  printf '%s\n' "$entries" | grep -qx 'commands/host/upsun-files-pull'
   printf '%s\n' "$entries" | grep -qx 'rdg/'
   printf '%s\n' "$entries" | grep -qx 'config.rdg.yaml'
   printf '%s\n' "$entries" | grep -qx 'providers/platform.yaml'

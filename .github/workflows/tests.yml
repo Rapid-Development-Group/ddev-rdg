@@ -12,8 +12,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bats jq
+          # Pinned, not 'latest': an unpinned download means CI can break with no
+          # change to this repo, and a yq behaviour change would surface as a
+          # mysterious test failure rather than a dependency bump.
           sudo curl -fsSL -o /usr/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            https://github.com/mikefarah/yq/releases/download/v4.53.3/yq_linux_amd64
           sudo chmod +x /usr/bin/yq
           bats --version && jq --version && yq --version
 

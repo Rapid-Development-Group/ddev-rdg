@@ -1,9 +1,41 @@
 #!/usr/bin/env bash
 #ddev-generated
-# Shared by commands/host/platform-db-pull and commands/host/platform-files-pull.
-# Both take the same single optional argument -- a Platform.sh environment name --
-# so the validation lives here rather than being copy-pasted into two files that
+# Shared by commands/host/upsun-db-pull and commands/host/upsun-files-pull.
+# Both take the same single optional argument -- an Upsun environment name -- so
+# the validation lives here rather than being copy-pasted into two files that
 # would then drift.
+
+# rdg_pull_provider <command-name> <project-root>
+# Sets RDG_PULL_PROVIDER to the DDEV pull provider this repo should use.
+#
+# The commands are named 'upsun-*' because that is what the service is called now,
+# but Upsun comes in two shapes and DDEV has a separate provider recipe for each:
+#
+#   Upsun Fixed (formerly Platform.sh) -- .platform/ directory, 'platform' CLI,
+#     PLATFORMSH_CLI_TOKEN, 'ddev pull platform'.
+#   Upsun Flex -- .upsun/ directory, 'upsun' CLI, UPSUN_CLI_TOKEN,
+#     'ddev pull upsun'.
+#
+# The tracked project link file is what distinguishes them. Both recipes use
+# PLATFORM_ENVIRONMENT for the environment, so nothing else here changes.
+rdg_pull_provider() {
+  local self="$1" root="$2"
+  if [ -f "$root/.upsun/local/project.yaml" ]; then
+    # Refuses rather than falling through to 'ddev pull upsun'. DDEV's stock
+    # upsun.yaml is not the recipe this add-on vets: it does
+    # 'mount:download --all --target=/var/www/html', which puts the public files
+    # beside the docroot instead of inside it and drags down every other mount,
+    # and it still carries db_push_command and files_push_command. Silently using
+    # it would hand back a production push path that was deliberately removed.
+    printf '%s: this project is linked to Upsun Flex (.upsun/local/project.yaml).\n' "$self" >&2
+    printf 'ddev-rdg only ships a vetted pull recipe for Upsun Fixed, so this refuses\n' >&2
+    printf "rather than fall back to DDEV's stock upsun recipe, which restores the push\n" >&2
+    printf 'commands and downloads mounts to the wrong place.\n' >&2
+    printf 'Use "ddev pull upsun" directly if that is what you want.\n' >&2
+    return 78
+  fi
+  RDG_PULL_PROVIDER=platform
+}
 
 # rdg_pull_parse_env <command-name> [environment]
 # Sets RDG_PULL_ENV to the environment name, or to the empty string when no

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+#ddev-generated
+## Description: Pull the public files from an Upsun environment (database untouched)
+## Usage: upsun-files-pull [environment]
+## Example: "ddev upsun-files-pull" or "ddev upsun-files-pull staging"
+
+set -euo pipefail
+
+# The files half of upsun-db-pull, same ergonomics. Sugar for:
+#   ddev pull <provider> --skip-db --environment="PLATFORM_ENVIRONMENT=<env>"
+# The provider's files_import_command downloads the one mount that matters
+# (web/sites/default/files) into $DDEV_FILES_DIR.
+project_root="${DDEV_APPROOT:?must be run through ddev}"
+source "$project_root/.ddev/rdg/pull-args.sh"
+
+self="$(basename "$0")"
+rdg_pull_provider "$self" "$project_root"
+rdg_pull_parse_env "$self" "$@"
+
+args=(pull "$RDG_PULL_PROVIDER" --skip-db)
+
+# Announce the target: DDEV's confirmation prompt never names the environment.
+# See upsun-db-pull for the rest of the reasoning.
+if [ -n "$RDG_PULL_ENV" ]; then
+  args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
+  printf "Pulling the public files from Upsun environment '%s'" "$RDG_PULL_ENV"
+  printf ' (an inactive environment will be resumed).\n'
+else
+  printf 'Pulling the public files from the environment pinned in .ddev/config.yaml.\n'
+fi
+
+exec ddev "${args[@]}"

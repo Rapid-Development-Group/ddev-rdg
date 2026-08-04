@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Coverage for commands/host/platform-db-pull and commands/host/platform-files-pull.
+# Coverage for commands/host/upsun-db-pull and commands/host/upsun-files-pull.
 # Neither needs a running project: each one's entire job is to build an argv and
 # hand it to 'ddev pull platform', so a stub ddev on PATH that records what it was
 # called with turns the real contract -- the exact command line -- into an assertion.
@@ -42,7 +42,7 @@ argv_lacks() { ! grep -qxF -e "$1" "$ARGV"; }
 
 # The commands under test, with the flag each must pass and the flag each must
 # never pass. Kept as one list so a new sibling command cannot skip the matrix.
-BOTH="platform-db-pull:--skip-files:--skip-db platform-files-pull:--skip-db:--skip-files"
+BOTH="upsun-db-pull:--skip-files:--skip-db upsun-files-pull:--skip-db:--skip-files"
 
 # --- the argv each command builds --------------------------------------------
 
@@ -90,7 +90,7 @@ BOTH="platform-db-pull:--skip-files:--skip-db platform-files-pull:--skip-db:--sk
 }
 
 @test "each command passes only its own skip flag, never the other one" {
-  # The copy-paste failure these two files invite: platform-db-pull skipping the db.
+  # The copy-paste failure these two files invite: upsun-db-pull skipping the db.
   local spec cmd mine theirs
   for spec in $BOTH; do
     IFS=: read -r cmd mine theirs <<< "$spec"
@@ -118,7 +118,7 @@ BOTH="platform-db-pull:--skip-files:--skip-db platform-files-pull:--skip-db:--sk
 }
 
 @test "an environment name containing a slash survives unmangled" {
-  # Platform.sh environment names mirror branch names, so 'feature/x' is ordinary.
+  # Upsun environment names mirror branch names, so 'feature/x' is ordinary.
   local spec cmd
   for spec in $BOTH; do
     IFS=: read -r cmd _ _ <<< "$spec"
@@ -182,7 +182,7 @@ assert_rejected() {
 }
 
 @test "rejects an empty environment argument" {
-  # 'ddev platform-db-pull ""' would otherwise pass --environment=PLATFORM_ENVIRONMENT=
+  # 'ddev upsun-db-pull ""' would otherwise pass --environment=PLATFORM_ENVIRONMENT=
   # and pull from whatever the provider then derives.
   local spec cmd
   for spec in $BOTH; do
@@ -201,6 +201,40 @@ assert_rejected() {
     [ "$status" -ne 0 ]
     printf '%s' "$output" | grep -qF 'must be run through ddev'
     [ ! -f "$ARGV" ]
+  done
+}
+
+# --- Upsun Fixed vs Upsun Flex ------------------------------------------------
+
+@test "an Upsun Fixed repo pulls with the platform provider" {
+  # The commands are named upsun-* because the service is, but Upsun Fixed is the
+  # rebranded Platform.sh: .platform/ directory, 'platform' CLI, and DDEV's
+  # 'platform' provider recipe -- the one this add-on vets.
+  local spec cmd
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    [ "$status" -eq 0 ]
+    argv_has platform
+    argv_lacks upsun
+  done
+}
+
+@test "an Upsun Flex repo is refused rather than pulled with the stock recipe" {
+  # Falling through to 'ddev pull upsun' would use DDEV's stock upsun.yaml, which
+  # does 'mount:download --all --target=/var/www/html' and still carries
+  # db_push_command and files_push_command. Using it silently would hand back the
+  # production push path this add-on deliberately removed.
+  local spec cmd
+  mkdir -p "$PROJ/.upsun/local"
+  printf 'id: abc123\n' > "$PROJ/.upsun/local/project.yaml"
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    [ "$status" -ne 0 ] || { echo "$cmd: expected refusal, got 0"; return 1; }
+    printf '%s' "$output" | grep -qF 'Upsun Flex'
+    printf '%s' "$output" | grep -qF 'ddev pull upsun'
+    [ ! -f "$ARGV" ] || { echo "$cmd pulled anyway: $(cat "$ARGV")"; return 1; }
   done
 }
 

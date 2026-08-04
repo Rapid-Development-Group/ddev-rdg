@@ -58,18 +58,27 @@ Three things to expect:
   `ddev add-on get` can still resolve the previous one. Check with
   `ddev add-on list --installed`, and pin explicitly if needed:
 
-      ddev add-on get Rapid-Development-Group/ddev-rdg --version v1.2.0
+      ddev add-on get Rapid-Development-Group/ddev-rdg --version v1.3.0
 
 ## Usage
 
-### Pulling from a Platform.sh environment
+### Pulling from an Upsun environment
 
-    ddev platform-db-pull [environment]      # database only
-    ddev platform-files-pull [environment]   # public files only
+    ddev upsun-db-pull [environment]      # database only
+    ddev upsun-files-pull [environment]   # public files only
 
 Sugar for `ddev pull platform --skip-files --environment="PLATFORM_ENVIRONMENT=<env>"`
 and its `--skip-db` counterpart, so choosing an environment costs one word instead of
 sixty characters.
+
+Named `upsun-*` because that is what the service is called now, whichever plan a
+project is on. **Upsun Fixed** — the rebranded Platform.sh, with a `.platform/`
+directory and the `platform` CLI — is what these support, and DDEV's `platform`
+provider is what they invoke. **Upsun Flex** projects (`.upsun/config.yaml`, the
+`upsun` CLI) are detected via `.upsun/local/project.yaml` and **refused**, rather than
+falling through to DDEV's stock `upsun` recipe: that recipe downloads every mount to
+`/var/www/html` and still ships `db_push_command` and `files_push_command`, so using it
+silently would restore a production push path this add-on removed on purpose.
 
 With no argument neither command passes `--environment` at all, so whatever the project
 pins in its own `.ddev/config.yaml` applies — deliberately not hardcoded to `master`,
@@ -82,7 +91,7 @@ results of a fresh pull"* — it never names the environment, so the commands do
 Neither passes `-y`: replacing local data is worth one keypress. Neither takes flags
 either — for `--skip-import` and friends, use `ddev pull platform` directly.
 
-**Naming an inactive environment resumes it on Platform.sh.** The provider's
+**Naming an inactive environment resumes it on Upsun.** The provider's
 `auth_command` runs `platform environment:resume` when the environment is not active.
 That is a change to remote state, and on a typical project most non-production
 environments are Inactive.

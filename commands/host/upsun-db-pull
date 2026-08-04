@@ -1,24 +1,32 @@
 #!/usr/bin/env bash
 
 #ddev-generated
-## Description: Pull the database from a Platform.sh environment (files untouched)
-## Usage: platform-db-pull [environment]
-## Example: "ddev platform-db-pull" or "ddev platform-db-pull staging"
+## Description: Pull the database from an Upsun environment (files untouched)
+## Usage: upsun-db-pull [environment]
+## Example: "ddev upsun-db-pull" or "ddev upsun-db-pull staging"
 
 set -euo pipefail
 
 # Sugar for:
-#   ddev pull platform --skip-files --environment="PLATFORM_ENVIRONMENT=<env>"
+#   ddev pull <provider> --skip-files --environment="PLATFORM_ENVIRONMENT=<env>"
 # which is what the tooling this replaced spelled 'platform-db-pull <env>'.
+#
+# Named 'upsun-' rather than 'platform-' because that is what the service is
+# called now, whichever plan a project is on. rdg_pull_provider picks the DDEV
+# provider matching this repo's shape -- which is still 'platform' on an Upsun
+# Fixed project. See rdg/pull-args.sh.
 #
 # DDEV_APPROOT rather than a path relative to BASH_SOURCE: this is a host command,
 # DDEV always sets the variable, and commands/host/rdg-sync already establishes the
 # idiom for locating project files from this directory.
-source "${DDEV_APPROOT:?must be run through ddev}/.ddev/rdg/pull-args.sh"
+project_root="${DDEV_APPROOT:?must be run through ddev}"
+source "$project_root/.ddev/rdg/pull-args.sh"
 
-rdg_pull_parse_env "$(basename "$0")" "$@"
+self="$(basename "$0")"
+rdg_pull_provider "$self" "$project_root"
+rdg_pull_parse_env "$self" "$@"
 
-args=(pull platform --skip-files)
+args=(pull "$RDG_PULL_PROVIDER" --skip-files)
 
 # Announce the target before handing off. DDEV's own confirmation prompt says only
 # "You're about to delete the current database and replace with the results of a
@@ -31,7 +39,7 @@ if [ -n "$RDG_PULL_ENV" ]; then
   args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
   # The resume is the provider's auth_command, not ours, and it is a change to
   # remote state: most non-production environments sit Inactive.
-  printf "Pulling the database from Platform.sh environment '%s'" "$RDG_PULL_ENV"
+  printf "Pulling the database from Upsun environment '%s'" "$RDG_PULL_ENV"
   printf ' (an inactive environment will be resumed).\n'
 else
   # With no argument no --environment is passed at all, so the environment pinned in
