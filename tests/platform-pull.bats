@@ -101,6 +101,22 @@ BOTH="platform-db-pull:--skip-files:--skip-db platform-files-pull:--skip-db:--sk
   done
 }
 
+@test "names the target environment on stdout before handing off" {
+  # DDEV's confirmation prompt says only "You're about to delete the current
+  # database and replace with the results of a fresh pull" -- it never names the
+  # environment. Verified against ddev 1.25.3. Without this line the one fact worth
+  # confirming is the one fact not shown, so it is asserted rather than assumed.
+  local spec cmd
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    printf '%s' "$output" | grep -qF "environment 'staging'"
+    # And says so when falling back to the project's pinned environment.
+    pull_run "$cmd"
+    printf '%s' "$output" | grep -qF 'pinned in .ddev/config.yaml'
+  done
+}
+
 @test "an environment name containing a slash survives unmangled" {
   # Platform.sh environment names mirror branch names, so 'feature/x' is ordinary.
   local spec cmd

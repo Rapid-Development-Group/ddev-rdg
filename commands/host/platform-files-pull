@@ -17,11 +17,14 @@ rdg_pull_parse_env "$(basename "$0")" "$@"
 
 args=(pull platform --skip-db)
 
-# 'if', not '[ -n ... ] && args+=(...)': a failing && list in non-final position
-# exits the script under 'set -e', so the no-argument case would abort here.
+# Announce the target: DDEV's confirmation prompt never names the environment.
+# See platform-db-pull for the rest of the reasoning.
 if [ -n "$RDG_PULL_ENV" ]; then
   args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
+  printf "Pulling the public files from Platform.sh environment '%s'" "$RDG_PULL_ENV"
+  printf ' (an inactive environment will be resumed).\n'
+else
+  printf 'Pulling the public files from the environment pinned in .ddev/config.yaml.\n'
 fi
 
-# No -y, and no --environment when no argument was given. See platform-db-pull.
 exec ddev "${args[@]}"

@@ -34,6 +34,32 @@ Note: `ddev add-on remove rdg` deletes the three generated files, but leaves
 generated-marker comment, which that file deliberately does not carry. Delete it
 by hand if unwanted.
 
+## Upgrading
+
+**DDEV never updates add-ons on its own.** There is no auto-update and no notification
+when a new version exists; an installed add-on stays at whatever version it was
+installed from until someone re-runs the install.
+
+    ddev add-on list --installed                       # what you have
+    ddev add-on get Rapid-Development-Group/ddev-rdg   # take the latest release
+    git add .ddev && git commit
+    ddev restart
+
+Three things to expect:
+
+- **`providers/platform.yaml` is skipped**, loudly: *"NOT overwriting … The
+  #ddev-generated signature was not found."* Correct and harmless — that file omits the
+  marker on purpose. To take a new version of it, delete it first and re-run.
+- **Upgrading does not re-derive.** `config.platformsh.yaml` is only rewritten by
+  `ddev rdg-sync`, so run that too when a release changes the derivation. The pre-start
+  guard hashes only the *source* files, so it will not catch this for you.
+- **Add-on resolution is by GitHub *release*, not tag.** A version tagged but not
+  released is invisible; and for the first minute or so after publishing a release,
+  `ddev add-on get` can still resolve the previous one. Check with
+  `ddev add-on list --installed`, and pin explicitly if needed:
+
+      ddev add-on get Rapid-Development-Group/ddev-rdg --version v1.2.0
+
 ## Usage
 
 ### Pulling from a Platform.sh environment
@@ -49,12 +75,17 @@ With no argument neither command passes `--environment` at all, so whatever the 
 pins in its own `.ddev/config.yaml` applies — deliberately not hardcoded to `master`,
 since repos pin different environments.
 
-Neither passes `-y`: DDEV's confirmation is what shows which environment is about to
-overwrite local data, and picking the environment is the whole point. Neither takes any
-flags either — for `--skip-import` and friends, use `ddev pull platform` directly.
+Each command prints the environment it is about to pull from. DDEV's own confirmation
+prompt says only *"You're about to delete the current database and replace with the
+results of a fresh pull"* — it never names the environment, so the commands do.
 
-Note that the provider resumes a paused environment (`platform environment:resume`)
-before pulling from it, which is a change to remote state.
+Neither passes `-y`: replacing local data is worth one keypress. Neither takes flags
+either — for `--skip-import` and friends, use `ddev pull platform` directly.
+
+**Naming an inactive environment resumes it on Platform.sh.** The provider's
+`auth_command` runs `platform environment:resume` when the environment is not active.
+That is a change to remote state, and on a typical project most non-production
+environments are Inactive.
 
 ### Keeping the derived config in sync
 

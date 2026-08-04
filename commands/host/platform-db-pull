@@ -20,16 +20,25 @@ rdg_pull_parse_env "$(basename "$0")" "$@"
 
 args=(pull platform --skip-files)
 
+# Announce the target before handing off. DDEV's own confirmation prompt says only
+# "You're about to delete the current database and replace with the results of a
+# fresh pull" -- it never names the environment, so without this line the one thing
+# worth confirming is the one thing not shown.
+#
 # 'if', not '[ -n ... ] && args+=(...)': a failing && list in non-final position
 # exits the script under 'set -e', so the no-argument case would abort here.
 if [ -n "$RDG_PULL_ENV" ]; then
   args+=(--environment="PLATFORM_ENVIRONMENT=$RDG_PULL_ENV")
+  # The resume is the provider's auth_command, not ours, and it is a change to
+  # remote state: most non-production environments sit Inactive.
+  printf "Pulling the database from Platform.sh environment '%s'" "$RDG_PULL_ENV"
+  printf ' (an inactive environment will be resumed).\n'
+else
+  # With no argument no --environment is passed at all, so the environment pinned in
+  # the project's own .ddev/config.yaml applies. Not hardcoded to 'master' here:
+  # different repos in the fleet pin different environments.
+  printf 'Pulling the database from the environment pinned in .ddev/config.yaml.\n'
 fi
 
-# No -y. DDEV's confirmation is what shows which environment is about to overwrite
-# the local database, and picking the environment is this command's whole purpose.
-#
-# With no argument, no --environment is passed at all -- the environment pinned in
-# the project's own .ddev/config.yaml then applies. Not hardcoded to 'master' here:
-# different repos in the fleet pin different environments.
+# No -y: replacing the local database is worth one keypress.
 exec ddev "${args[@]}"
