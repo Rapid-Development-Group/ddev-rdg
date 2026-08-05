@@ -543,7 +543,7 @@ here needs a custom `docker-compose.*.yaml`:
 | `mailhog` / `mailpit` | built in — `ddev mailpit` |
 | `redis` | `ddev add-on get ddev/ddev-redis` |
 | `solr` | `ddev add-on get ddev/ddev-drupal-solr` |
-| `minio` | `ddev add-on get ddev/ddev-minio` |
+| `minio` / `rustfs` | `ddev add-on get Rapid-Development-Group/ddev-rustfs` — see [S3 emulation](#s3-emulation) |
 | `chrome` / chromedriver | `ddev add-on get ddev/ddev-selenium-standalone-chrome` |
 | `webpack` / `theme` node container | `web_extra_daemons` — see step 4 |
 
@@ -690,6 +690,53 @@ ddev import-db --file=<dump.sql.gz>
 
 Source the dump however the repo already documents it — most of these sites have a
 nightly backup on S3. Check the repo's own README before inventing a process.
+
+## S3 emulation
+
+Only for sites using `s3fs`. Replaces the `minio` compose service, and the `rustfs` one
+if the repo has already been migrated on the `dkr` side:
+
+```sh
+ddev add-on get Rapid-Development-Group/ddev-rustfs
+ddev restart
+ddev s3-init            # creates the bucket, makes it publicly readable
+```
+
+`ddev s3-init` with no arguments reads the bucket name from the site's own s3fs config.
+`ddev aws` is the `aws` CLI pointed at it, so bulk loading still works:
+`ddev aws s3 sync ./photos s3://BUCKET/public/photos`. Both need `aws` on your host.
+
+Then point s3fs at it, in the DDEV branch of `settings.development.php` — leaving the
+tracked `s3fs.settings.yml` alone so `dkr up` keeps working:
+
+```php
+if (getenv('IS_DDEV_PROJECT')) {
+  $config['s3fs.settings']['hostname'] = getenv('DDEV_PRIMARY_URL') . ':10101';
+  $config['s3fs.settings']['use_path_style_endpoint'] = TRUE;
+  $settings['s3fs.access_key'] = 'rustfs';
+  $settings['s3fs.secret_key'] = 'rustfs123';
+}
+```
+
+**`use_path_style_endpoint` is the one that bites.** The tracked value is `false`,
+because `dkr` needed virtual-hosted addressing: the SDK asks for
+`http://<bucket>.<host>`, and the compose file provided a matching network alias plus an
+`/etc/hosts` entry on the host. DDEV has no such alias, so under DDEV the name resolves
+to `127.0.0.1` through those same stale `/etc/hosts` lines and every write fails with
+`cURL error 7: Failed to connect`. The failure looks like a broken container rather than
+a config problem, and `file_put_contents('s3://…')` still returns a byte count, so a
+casual check passes. Delete the `.minio` / `.rustfs` lines from `/etc/hosts` while you
+are here; they only disguise this.
+
+**The endpoint host must be the project's DDEV hostname, not the `rustfs` service name.**
+With s3fs's `use_cname` off, the URL the *browser* loads an image from is the same
+endpoint the SDK writes through, and `rustfs` resolves only inside the Docker network —
+so uploads would succeed while every image failed to load. Use `DDEV_PRIMARY_URL`, never
+`DDEV_HOSTNAME`: the latter is a comma-separated list of every hostname, so on a site
+with `additional_hostnames` it yields `https://a,b:10101`, which curl rejects.
+
+Verify with a real upload rather than by reading config — add a media image in the admin
+UI and confirm it renders.
 
 ## 7. Verify, then leave `dkr` in place
 
