@@ -578,6 +578,17 @@ web_environment:
 Unlike Part 2 there is no "do not restate what the add-on derives" rule, because nothing
 is derived. Everything the site needs goes in this file.
 
+Two things about editing it:
+
+- **`ddev config <flags>` rewrites this file and strips every comment.** Use it to
+  create the file, then edit by hand. The annotations explaining where a value came from
+  are the most useful thing in it, and they are silently lost otherwise.
+- **Changing `database:` after the project has started fails**, because a volume already
+  exists at the old version: *"the configured database type does not match the current
+  actual database"*. Get the version right before the first start, or
+  `ddev stop --remove-data --omit-snapshot` — which destroys the local database, so
+  export first if it holds anything.
+
 ## 4. The theme watcher
 
 Under `dkr` this was a second container running `yarn docker-start`. In DDEV it is a
@@ -602,6 +613,25 @@ which is exactly what a `docker-start` script does — so repos with one need no
 filesystem produces no inotify events) and the `arm64` libpng build flag. See
 [The theme watcher](#the-theme-watcher).
 
+**You almost certainly also need a build toolchain.** `imagemin`'s binary dependencies
+(`gifsicle`, `optipng`, `mozjpeg`) ship x86_64-only prebuilts, so on Apple silicon yarn
+compiles them from source — and fails without the tools to do it. The symptom is the
+daemon crash-looping on `theme-watch: dependency install failed`, preceded a few lines
+earlier by the real cause, `Command failed: …/gifsicle/vendor/gifsicle --version`.
+
+On Upsun repos `ddev rdg-sync` writes this file for you. Native repos maintain it by
+hand — `.ddev/web-build/Dockerfile.<something>`, since DDEV reads every
+`web-build/Dockerfile.*`:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf automake libtool dh-autoreconf make pkg-config zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+Adding it needs a `ddev restart`, and a stale `node_modules` from the failed installs is
+worth deleting first.
+
 ## 5. Teach `settings.php` about DDEV
 
 The Part 2 change applies unchanged — local overrides gated on `getenv('DOCKER')` need
@@ -611,18 +641,44 @@ to accept DDEV too, and both, so `dkr` keeps working:
 $on_local = getenv('DOCKER') || getenv('IS_DDEV_PROJECT');
 ```
 
-Then one trap specific to native repos. `dkr` set `DB_HOST`, `DB_NAME`, `DB_USER` and
+Then two traps specific to native repos.
+
+**The dkr-era `DB_*` variables.** `dkr` set `DB_HOST`, `DB_NAME`, `DB_USER` and
 `DB_PASSWORD` in the compose environment, and dkr-era settings read them directly —
 sometimes unconditionally, as `$_SERVER['DB_HOST']`. DDEV sets none of them, so that is
-a PHP warning on every request before the site even reaches a database. Two options:
+a PHP warning on every request before the site even reaches a database. Declare them in
+`web_environment` and the existing code keeps working, with one path for both tools:
 
-- keep the variables and let DDEV's values flow in, by declaring them in
-  `web_environment` (`DB_HOST=db`, `DB_USER=db`, `DB_PASSWORD=db`); or
-- gate the dkr-era block on `getenv('DOCKER')` and let `settings.ddev.php` — which DDEV
-  writes and maintains — provide the connection.
+```yaml
+web_environment:
+    - DB_HOST=db
+    - DB_USER=db
+    - DB_PASSWORD=db
+```
 
-The first is the smaller diff and keeps one code path for both tools. Prefer it unless
-the settings file is already branching per environment.
+`web_environment` does reach `$_SERVER` under nginx-fpm, not only `getenv()` — verified
+on DDEV 1.25.3 — so a settings file reading either style needs no change.
+
+**`settings.ddev.php` wins over anything the repo sets.** DDEV appends its include to
+the *end* of `settings.php`, so it runs after every settings file the repo includes and
+overrides `$databases['default']['default']` with its own — database `db`, user `db`.
+A repo that names its local database something else will find that name quietly ignored.
+
+Let DDEV win. Its tooling — `ddev mysql`, `ddev sequelace`, `ddev export-db`, snapshots —
+all assume the database is called `db`, and fighting that costs more than it returns.
+What matters is that the repo's settings files not *claim* otherwise:
+
+```php
+// The default connection is dkr's only. Under DDEV it comes from settings.ddev.php,
+// which settings.php includes after this file and which therefore wins.
+if (!getenv('IS_DDEV_PROJECT')) {
+  $databases['default']['default']['database'] = getenv('DB_NAME') . '_us';
+}
+```
+
+Additional connections (a migration source, a second country) are untouched by
+`settings.ddev.php` and keep working as they are, once their host stops assuming one
+container per database.
 
 ## 6. Getting a database
 
@@ -653,17 +709,26 @@ the two can be compared directly.
 
 Neither is universal, but both are silent when got wrong.
 
-**More than one database.** Some of these sites run several. DDEV uses one `db`
-container and can hold as many databases as you like inside it:
+**More than one database.** Some of these sites run several — `tmt-brand-d8` has two,
+`smb-franchise-d9` three. DDEV uses one `db` container and can hold as many databases as
+you like inside it:
 
 ```sh
 ddev import-db --database=<name> --file=<dump.sql.gz>
 ```
 
-`settings.php` then connects to host `db` with the database named per connection. If it
-builds database names from an environment variable, set that variable in
-`web_environment` and let the existing code do the rest — DDEV's default `db` database
-simply goes unused, which costs nothing.
+The trap is the *host*, not the name: `dkr` ran a container per database, so settings
+files tend to build the hostname from the database (`mariadb-us`, `mariadb-ca`). Under
+DDEV every one of them is on host `db` and only the database name differs.
+
+`ddev import-db --database=` creates the database as needed, but a database you want to
+exist while *empty* — an unpopulated migration source — has to be created by hand, and
+`ddev mysql` connects as an unprivileged user:
+
+```sh
+ddev exec 'mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS <name>;
+  GRANT ALL ON \`<name>\`.* TO \"db\"@\"%\"; FLUSH PRIVILEGES;"'
+```
 
 **Hostnames pinned in Drupal config, not just in nginx.** A second hostname is one line:
 
@@ -674,6 +739,32 @@ additional_hostnames:
 
 But if the site uses the Domain module, the local hostname is *also* a config entity —
 `conf/sync/domain_alias.alias.*.yml` with `pattern: 'docker.localhost:8000'`. Nothing
-matches `*.ddev.site` until either a new `domain_alias` exists for it or `settings.php`
-overrides the pattern. Symptom: the site loads, but as the wrong domain or not at all,
-with nothing in the logs about hostnames.
+matches `*.ddev.site` until a `domain_alias` exists for it. Symptom: the site loads, but
+as the wrong domain, with nothing in the logs about hostnames.
+
+Add one alias per hostname, alongside dkr's rather than replacing them — they coexist
+happily, and the `environment: local` key means neither affects production:
+
+```yaml
+# conf/sync/domain_alias.alias.<id>.yml
+uuid: <a fresh uuid>
+langcode: en
+status: true
+dependencies: {  }
+id: <id>
+domain_id: <the domain.record id this hostname belongs to>
+pattern: '<project>.ddev.site'
+redirect: 0
+environment: local
+```
+
+Then `ddev drush config:import --partial --source=<config dir>`. Verify with the
+negotiator rather than by eye, since a wrong answer still returns HTTP 200:
+
+```sh
+ddev drush --uri=https://ca.<project>.ddev.site \
+  ev 'echo \Drupal::service("domain.negotiator")->getActiveId(), PHP_EOL;'
+```
+
+That `--uri` is also how you run any drush command against the second country, where
+under `dkr` it was the production URL.
