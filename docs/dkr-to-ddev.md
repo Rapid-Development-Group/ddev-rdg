@@ -26,6 +26,27 @@ one directory below it:
 The add-on works this out for itself; nothing declares it. If you are ever unsure, run
 `ddev rdg-sync` — on a native repo it tells you so and changes nothing.
 
+**Watch for vestigial Upsun config.** Several repos in the fleet carry a
+`.platform.app.yaml` left over from an abandoned Platform.sh evaluation and actually
+deploy to AWS. Two signals tell them apart from a real Upsun repo:
+
+| | real Upsun repo | vestigial |
+|---|---|---|
+| `.platform/local/project.yaml` | present, with an `id` | absent — never linked to a project |
+| `devops/buildspec.yml` | absent | present (AWS CodeBuild) |
+
+File presence alone cannot distinguish "config we deploy from" from "config somebody
+left behind", so on one of these, say so explicitly:
+
+```sh
+touch .ddev/rdg-native      # commit it
+```
+
+That marker forces native mode and beats every other signal, `RDG_APP_ROOT` included.
+Without it the repo lands in derived mode, where the guard aborts every `ddev start`
+until someone runs `ddev rdg-sync` — which then derives PHP and database versions from a
+file nobody deploys from, and enforces them.
+
 ## What DDEV is, and why
 
 [DDEV](https://ddev.readthedocs.io/) does the same job `dkr` did: it runs a site's

@@ -29,6 +29,23 @@
 rdg_is_upsun_fixed() {
   local root="${1%/}"
 
+  # An explicit, committed statement that this repo is NOT on Upsun. It beats every
+  # signal below, RDG_APP_ROOT included: that is a per-shell override, this is a
+  # property of the repo, checked in.
+  #
+  # It exists because file presence cannot tell "config we deploy from" apart from
+  # "config somebody left behind". Several repos in the fleet carry a
+  # .platform.app.yaml from an abandoned Platform.sh evaluation and actually deploy to
+  # AWS -- devops/buildspec.yml, and no .platform/local/project.yaml, so the repo was
+  # never even linked to a project. Without this marker they land in derived mode,
+  # where the pre-start guard aborts every start until someone runs 'ddev rdg-sync',
+  # which then derives PHP and database versions from a file nobody deploys from. A
+  # wrong answer delivered confidently, which is worse than no answer.
+  #
+  # Deliberately a file rather than a config key: the guard runs on the host while the
+  # project is stopped, so it cannot read web_environment, and '[ -f ]' needs no yq.
+  [ -f "$root/.ddev/rdg-native" ] && return 1
+
   if [ -n "${RDG_APP_ROOT:-}" ]; then
     # Honoured even when it points at nothing: RDG_APP_ROOT is an explicit claim
     # that this repo is on Upsun, so the answer is yes and derive.sh gets to say

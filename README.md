@@ -16,6 +16,11 @@ level below it.
 | **derived** — Upsun Fixed | `.platform.app.yaml` | regenerates `config.platformsh.yaml`; a `pre-start` guard refuses to start on stale values |
 | **native** — everything else | `.ddev/config.yaml`, hand-written | nothing to derive, and says so |
 
+A repo carrying a `.platform.app.yaml` it does not actually deploy from — an abandoned
+Platform.sh evaluation, with no `.platform/local/project.yaml` and an AWS buildspec
+instead — should declare itself: `touch .ddev/rdg-native` and commit it. That forces
+native mode and beats every other signal, `RDG_APP_ROOT` included.
+
 In native mode the guard stands aside, `ddev rdg-sync` is a no-op that explains itself,
 and both `upsun-*-pull` commands refuse — there is no hosted environment behind the
 repo, so `ddev import-db --file=<dump>` is how a database arrives. What a native repo

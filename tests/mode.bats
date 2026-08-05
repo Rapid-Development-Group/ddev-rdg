@@ -72,6 +72,31 @@ is_upsun() {
   [ "$status" -ne 0 ]
 }
 
+@test ".ddev/rdg-native forces native even with an app config present" {
+  # Vestigial Upsun config is real in this fleet: several repos carry a
+  # .platform.app.yaml from an abandoned Platform.sh evaluation and deploy to AWS
+  # instead. Without the marker they land in derived mode, where the guard aborts every
+  # start until someone runs 'ddev rdg-sync', which then derives runtime versions from a
+  # file nobody deploys from.
+  printf 'type: "php:8.3"\n' > "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.ddev"
+  : > "$PROJ/.ddev/rdg-native"
+  is_upsun
+  [ "$status" -ne 0 ]
+}
+
+@test ".ddev/rdg-native beats RDG_APP_ROOT, which is only a per-shell override" {
+  # The marker is committed and describes the repo; the variable is an environment
+  # override for one command. If they disagree, the repo wins -- otherwise a stray
+  # export in someone's shell silently re-enables derivation on a native repo.
+  printf 'type: "php:8.3"\n' > "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.ddev"
+  : > "$PROJ/.ddev/rdg-native"
+  run env RDG_APP_ROOT=. bash -c \
+    "set -euo pipefail; source '$MODE'; rdg_is_upsun_fixed '$PROJ'"
+  [ "$status" -ne 0 ]
+}
+
 @test "RDG_APP_ROOT forces derived even when it points at nothing" {
   # The variable is an explicit claim that this repo is on Upsun. Answering native
   # on a typo would turn that typo into a quietly inert guard; derive.sh instead
