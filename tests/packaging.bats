@@ -77,6 +77,9 @@ shipped_files() {
   printf '%s\n' "$shipped" | grep -qF '/rdg/theme-watch.sh'
   # Sourced by both pull wrappers; ships inside rdg/ rather than as its own entry.
   printf '%s\n' "$shipped" | grep -qF '/rdg/pull-args.sh'
+  # Sourced by check-sync.sh, rdg-sync and pull-args.sh. Its absence would break
+  # the pre-start hook on every project, derived and native alike.
+  printf '%s\n' "$shipped" | grep -qF '/rdg/mode.sh'
 }
 
 @test "post_install_actions chmods every host command the add-on ships" {

@@ -20,6 +20,15 @@
 # PLATFORM_ENVIRONMENT for the environment, so nothing else here changes.
 rdg_pull_provider() {
   local self="$1" root="$2"
+
+  # shellcheck source=rdg/mode.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/mode.sh"
+
+  # Flex is checked BEFORE the not-on-Upsun case, and the order is load-bearing: a
+  # Flex repo has no .platform.app.yaml either -- its config lives in
+  # .upsun/config.yaml -- so it fails the Upsun Fixed test too. Checking native
+  # first would answer "not on Upsun" for a project that is very much on Upsun, and
+  # send the reader to 'ddev import-db' when what they want is 'ddev pull upsun'.
   if [ -f "$root/.upsun/local/project.yaml" ]; then
     # Refuses rather than falling through to 'ddev pull upsun'. DDEV's stock
     # upsun.yaml is not the recipe this add-on vets: it does
@@ -34,6 +43,20 @@ rdg_pull_provider() {
     printf 'Use "ddev pull upsun" directly if that is what you want.\n' >&2
     return 78
   fi
+
+  # Not on Upsun at all. Without this the command would invoke 'ddev pull platform'
+  # against a provider recipe with no project to authenticate to, and the failure
+  # would name the platform CLI rather than the actual problem. This is the "some
+  # things are not possible in native mode" case, stated where it is hit.
+  if ! rdg_is_upsun_fixed "$root"; then
+    printf '%s: this project is not on Upsun, so there is nothing to pull from.\n' "$self" >&2
+    printf 'Its .ddev/config.yaml is the source of truth and there is no hosted\n' >&2
+    printf 'environment behind it.\n\n' >&2
+    printf 'Load a database from a dump instead:\n\n' >&2
+    printf '  ddev import-db --file=<dump.sql.gz>\n\n' >&2
+    return 78
+  fi
+
   RDG_PULL_PROVIDER=platform
 }
 

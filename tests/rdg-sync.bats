@@ -80,6 +80,36 @@ generated_files_absent() {
   [ "$status" -eq 0 ]
 }
 
+# --- native mode -------------------------------------------------------------
+
+@test "native mode: explains which file is the source of truth and succeeds" {
+  # Previously this fell through to derive.sh and died with "no .platform.app.yaml",
+  # which reads as a broken install rather than as a project with nothing to derive.
+  # Exit 0 because running it here is a no-op, not an error.
+  find "$PROJ" -name .platform.app.yaml -delete
+  rm -rf "$PROJ/.platform"
+  sync_run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf '%s' "$output" | grep -qF 'not on Upsun'
+  printf '%s' "$output" | grep -qF '.ddev/config.yaml'
+  generated_files_absent
+}
+
+@test "native mode: a hand-written web_extra_daemons block is not a conflict" {
+  # The conflict pre-flight exists because DDEV appends list keys, so a hand-written
+  # daemon would coexist with the derived one and collide on container_port. In
+  # native mode nothing is derived, so the hand-written block is the only one -- and
+  # is exactly what the docs tell a native repo to write. Refusing would make the
+  # documented setup un-syncable.
+  find "$PROJ" -name .platform.app.yaml -delete
+  rm -rf "$PROJ/.platform"
+  printf 'name: proj\nweb_extra_daemons:\n    - name: theme\n      command: "true"\n' \
+    > "$PROJ/.ddev/config.yaml"
+  sync_run
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  printf '%s' "$output" | grep -qF 'not on Upsun'
+}
+
 # --- the conflict pre-flight -------------------------------------------------
 
 @test "refuses, and writes nothing, when config.yaml declares web_extra_daemons" {

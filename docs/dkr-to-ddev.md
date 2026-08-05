@@ -3,12 +3,28 @@
 For anyone who has used `dkr` and has never used DDEV. It assumes nothing about either
 beyond "I type `dkr up` and the site comes up".
 
-Two halves, and you probably want only one:
+Three parts, and you probably want only one:
 
 - **[Part 1: using a repo that already has DDEV](#part-1-using-a-repo-that-already-has-ddev)** —
   you cloned a site, it has a `.ddev/` directory, you want it running.
-- **[Part 2: migrating a repo that still uses `dkr`](#part-2-migrating-a-repo-that-still-uses-dkr)** —
-  once per site, by whoever does the migration.
+- **[Part 2: migrating an Upsun repo](#part-2-migrating-an-upsun-repo)** — once per
+  site, by whoever does the migration.
+- **[Part 3: migrating a repo that is not on Upsun](#part-3-migrating-a-repo-that-is-not-on-upsun)** —
+  same job, different half of the fleet.
+
+## Which kind of repo is this?
+
+Parts 2 and 3 differ in one thing only — **which file is the source of truth** — and
+everything else follows from it. Check for a `.platform.app.yaml`, at the repo root or
+one directory below it:
+
+| | hosted on | source of truth | `ddev rdg-sync` | `ddev upsun-db-pull` |
+|---|---|---|---|---|
+| **derived** | Upsun Fixed | `.platform.app.yaml` | regenerates DDEV config from it | works |
+| **native** | anything else (AWS, a VPS…) | `.ddev/config.yaml`, hand-written | nothing to derive, and says so | refuses; use `ddev import-db` |
+
+The add-on works this out for itself; nothing declares it. If you are ever unsure, run
+`ddev rdg-sync` — on a native repo it tells you so and changes nothing.
 
 ## What DDEV is, and why
 
@@ -131,6 +147,10 @@ ddev upsun-files-pull    # refresh the public files
 ddev poweroff            # stop every DDEV project and its router
 ```
 
+The two `upsun-*` commands are **Upsun-only**. On a native repo they refuse and point
+you at `ddev import-db --file=<dump.sql.gz>`, which is how a database arrives when there
+is no hosted environment to pull from.
+
 There is **no separate theme build step**. `ddev start` runs the asset watcher as a
 daemon, which installs dependencies and does a full compile before it begins watching —
 which is why the first `ddev start` after a clone takes longer than later ones.
@@ -147,8 +167,8 @@ which is why the first `ddev start` after a clone takes longer than later ones.
 | `dkr uli` | `ddev drush uli` (prints a launchable URL) |
 | `dkr open` | `ddev launch` |
 | `dkr db` | `ddev sequelace` or `ddev tableplus` |
-| `dkr platform-db-pull [env]` | `ddev upsun-db-pull [env]` |
-| (no equivalent) | `ddev upsun-files-pull [env]` |
+| `dkr platform-db-pull [env]` | `ddev upsun-db-pull [env]` — Upsun repos; else `ddev import-db --file=…` |
+| (no equivalent) | `ddev upsun-files-pull [env]` — Upsun repos only |
 | `dkr clean` | `ddev poweroff` |
 | `dkr grf` | `git checkout -- <files>` |
 
@@ -163,7 +183,8 @@ changes on restart, so run the command rather than saving a favourite.
 **`ddev start` sometimes refuses to start and tells you to run `ddev rdg-sync`.** That is
 working as designed: someone edited `.platform.app.yaml` and the derived DDEV config no
 longer matches it. Do what the message says. See
-[the staleness guard](#the-staleness-guard).
+[the staleness guard](#the-staleness-guard). This cannot happen on a native repo —
+there is no upstream to drift from, so the guard stands aside.
 
 **Do not run `ddev add-on get` in a repo that already has the add-on committed.** Its
 files and its generated config are tracked, which is what makes a clone correct on first
@@ -348,10 +369,11 @@ deleting `docker-compose.yml` and `.env`.
 
 ---
 
-# Part 2: migrating a repo that still uses `dkr`
+# Part 2: migrating an Upsun repo
 
 Once per site. Assumes the repo is an Upsun Fixed project with `.platform.app.yaml` at the
-repo root or one level below it.
+repo root or one level below it. If it has no such file, skip to
+[Part 3](#part-3-migrating-a-repo-that-is-not-on-upsun).
 
 ## 1. Install the add-on
 
@@ -481,3 +503,177 @@ It also sets `disable_settings_management: true` and deletes `settings.ddev.php`
 fine, so that trade is a loss too.
 
 `ddev-rdg` handles all three cases and leaves settings management alone.
+
+---
+
+# Part 3: migrating a repo that is not on Upsun
+
+Once per site, for a repo with no `.platform.app.yaml` — hosted on AWS, a VPS, anywhere.
+Same destination as Part 2, reached differently: **you write `.ddev/config.yaml` by
+hand, and it is the source of truth.** Nothing derives it, so nothing can overwrite it.
+
+You read `docker-compose.yml` and `.env` exactly once, here, while writing that file.
+After that they are dead weight, which is the point — the end state deletes them.
+
+## 1. Install the add-on
+
+```sh
+ddev config --project-type=drupal10 --project-name=<name> --docroot=<path/to/docroot>
+ddev add-on get Rapid-Development-Group/ddev-rdg
+```
+
+No `--skip-hooks` and no `ddev rdg-sync`: both exist to satisfy a staleness guard that
+has nothing to guard here. What the add-on is actually for on a native repo is
+`.ddev/rdg/theme-watch.sh` and the `corepack_enable` that script depends on.
+
+It also installs `providers/platform.yaml` and the two `upsun-*-pull` commands, which
+are inert. They refuse by name rather than failing obscurely, so nobody has to wonder
+whether they were meant to work.
+
+## 2. Translate the compose file
+
+Every service in a `dkr` stack is either built into DDEV or an official add-on. Nothing
+here needs a custom `docker-compose.*.yaml`:
+
+| `dkr` compose service | DDEV |
+|---|---|
+| `nginx` + `php` (wodby) | the built-in web container — `php_version`, `webserver_type` |
+| `traefik`, `PROJECT_BASE_URL=docker.localhost:8000` | the built-in router — `https://<project>.ddev.site` |
+| `mariadb` | the built-in `db` container — `database:` |
+| `mailhog` / `mailpit` | built in — `ddev mailpit` |
+| `redis` | `ddev add-on get ddev/ddev-redis` |
+| `solr` | `ddev add-on get ddev/ddev-drupal-solr` |
+| `minio` | `ddev add-on get ddev/ddev-minio` |
+| `chrome` / chromedriver | `ddev add-on get ddev/ddev-selenium-standalone-chrome` |
+| `webpack` / `theme` node container | `web_extra_daemons` — see step 4 |
+
+Read versions off the wodby image tags in `.env`. `PHP_TAG=8.1-dev-4.61.2` means
+`php_version: "8.1"`; `MARIADB_TAG=10.5-3.12.5` means MariaDB 10.5. The docroot is the
+`NGINX_SERVER_ROOT` combined with whatever the compose file mounts at
+`/var/www/html` — `./drupal/:/var/www/html` plus `NGINX_SERVER_ROOT: /var/www/html/web`
+gives `docroot: drupal/web` and `composer_root: drupal`.
+
+## 3. Write `.ddev/config.yaml`
+
+```yaml
+name: <project>
+type: drupal10
+docroot: drupal/web           # from the mount + NGINX_SERVER_ROOT
+composer_root: drupal         # where composer.json actually lives
+php_version: "8.1"            # from PHP_TAG
+nodejs_version: "14"          # from the node image tag
+database:
+    type: mariadb
+    version: "10.5"           # from MARIADB_TAG
+webserver_type: nginx-fpm
+corepack_enable: true         # the theme daemon runs yarn; this provides it
+use_dns_when_possible: true
+
+# Only what the app genuinely needs. DDEV supplies its own database credentials,
+# so do not copy the DB_* block over wholesale -- see step 5.
+web_environment:
+    - S3_FOLDER=dev-public.example.com
+```
+
+Unlike Part 2 there is no "do not restate what the add-on derives" rule, because nothing
+is derived. Everything the site needs goes in this file.
+
+## 4. The theme watcher
+
+Under `dkr` this was a second container running `yarn docker-start`. In DDEV it is a
+daemon inside the web container, and it runs the same shipped script the Upsun repos
+use:
+
+```yaml
+web_extra_daemons:
+    - name: theme
+      command: "bash /var/www/html/.ddev/rdg/theme-watch.sh"
+      directory: /var/www/html/drupal/web
+web_extra_exposed_ports:
+    - name: livereload
+      container_port: 35729
+      http_port: 35728
+      https_port: 35729
+```
+
+`theme-watch.sh` already does `yarn --network-concurrency 1` and then `exec yarn start`,
+which is exactly what a `docker-start` script does — so repos with one need no change to
+`package.json`. It also carries the two fixes that container needed: polling (a mounted
+filesystem produces no inotify events) and the `arm64` libpng build flag. See
+[The theme watcher](#the-theme-watcher).
+
+## 5. Teach `settings.php` about DDEV
+
+The Part 2 change applies unchanged — local overrides gated on `getenv('DOCKER')` need
+to accept DDEV too, and both, so `dkr` keeps working:
+
+```php
+$on_local = getenv('DOCKER') || getenv('IS_DDEV_PROJECT');
+```
+
+Then one trap specific to native repos. `dkr` set `DB_HOST`, `DB_NAME`, `DB_USER` and
+`DB_PASSWORD` in the compose environment, and dkr-era settings read them directly —
+sometimes unconditionally, as `$_SERVER['DB_HOST']`. DDEV sets none of them, so that is
+a PHP warning on every request before the site even reaches a database. Two options:
+
+- keep the variables and let DDEV's values flow in, by declaring them in
+  `web_environment` (`DB_HOST=db`, `DB_USER=db`, `DB_PASSWORD=db`); or
+- gate the dkr-era block on `getenv('DOCKER')` and let `settings.ddev.php` — which DDEV
+  writes and maintains — provide the connection.
+
+The first is the smaller diff and keeps one code path for both tools. Prefer it unless
+the settings file is already branching per environment.
+
+## 6. Getting a database
+
+There is no pull provider, so no `ddev upsun-db-pull`:
+
+```sh
+ddev import-db --file=<dump.sql.gz>
+```
+
+Source the dump however the repo already documents it — most of these sites have a
+nightly backup on S3. Check the repo's own README before inventing a process.
+
+## 7. Verify, then leave `dkr` in place
+
+```sh
+ddev start
+ddev composer install
+ddev import-db --file=<dump.sql.gz>
+ddev launch
+```
+
+Check the theme daemon is `RUNNING` (`ddev exec supervisorctl status
+webextradaemons:theme`) and that a `.scss` edit reaches the compiled CSS. Then **stop** —
+leave `docker-compose.yml`, `.env` and the `Brewfile` alone until the team has moved, so
+the two can be compared directly.
+
+## Two things worth checking for before you start
+
+Neither is universal, but both are silent when got wrong.
+
+**More than one database.** Some of these sites run several. DDEV uses one `db`
+container and can hold as many databases as you like inside it:
+
+```sh
+ddev import-db --database=<name> --file=<dump.sql.gz>
+```
+
+`settings.php` then connects to host `db` with the database named per connection. If it
+builds database names from an environment variable, set that variable in
+`web_environment` and let the existing code do the rest — DDEV's default `db` database
+simply goes unused, which costs nothing.
+
+**Hostnames pinned in Drupal config, not just in nginx.** A second hostname is one line:
+
+```yaml
+additional_hostnames:
+    - ca.<project>          # -> https://ca.<project>.ddev.site
+```
+
+But if the site uses the Domain module, the local hostname is *also* a config entity —
+`conf/sync/domain_alias.alias.*.yml` with `pattern: 'docker.localhost:8000'`. Nothing
+matches `*.ddev.site` until either a new `domain_alias` exists for it or `settings.php`
+overrides the pattern. Symptom: the site loads, but as the wrong domain or not at all,
+with nothing in the logs about hostnames.

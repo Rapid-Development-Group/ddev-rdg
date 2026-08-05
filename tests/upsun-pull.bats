@@ -15,7 +15,14 @@ setup() {
   ARGV="$BATS_TEST_TMPDIR/argv"
 
   mkdir -p "$PROJ/.ddev/rdg" "$STUB_BIN"
-  cp "$REPO_ROOT/rdg/pull-args.sh" "$PROJ/.ddev/rdg/"
+  # rdg/*.sh, not just pull-args.sh: it sources mode.sh as a sibling.
+  cp "$REPO_ROOT"/rdg/*.sh "$PROJ/.ddev/rdg/"
+
+  # Every test below except the two mode tests at the bottom is about an Upsun
+  # Fixed repo, and pull is refused outright on a repo that is not on Upsun -- so
+  # the fixture has to actually be one. This was implicit until the mode predicate
+  # existed; now it has to be stated or the whole file tests the refusal path.
+  printf 'type: "php:8.3"\n' > "$PROJ/.platform.app.yaml"
 
   # Records argv one element per line, so an assertion can match a whole argument
   # exactly (grep -x) rather than as a substring of the joined string.
@@ -217,6 +224,40 @@ assert_rejected() {
     [ "$status" -eq 0 ]
     argv_has platform
     argv_lacks upsun
+  done
+}
+
+@test "a repo that is not on Upsun is refused, and pointed at import-db" {
+  # Native mode: .ddev/config.yaml is the source of truth and there is no hosted
+  # environment behind it. Without this the command would run 'ddev pull platform'
+  # against a provider with no project and fail naming the platform CLI.
+  local spec cmd
+  rm -f "$PROJ/.platform.app.yaml"
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    [ "$status" -ne 0 ] || { echo "$cmd: expected refusal, got 0"; return 1; }
+    printf '%s' "$output" | grep -qF 'not on Upsun'
+    printf '%s' "$output" | grep -qF 'ddev import-db'
+    [ ! -f "$ARGV" ] || { echo "$cmd pulled anyway: $(cat "$ARGV")"; return 1; }
+  done
+}
+
+@test "an Upsun Flex repo is refused as Flex, not as 'not on Upsun'" {
+  # Order-dependence made explicit: a Flex repo has no .platform.app.yaml either,
+  # so it fails the Upsun Fixed test too. If the native check ran first, a Flex
+  # user would be told they are not on Upsun and sent to 'ddev import-db' instead
+  # of to 'ddev pull upsun'.
+  local spec cmd
+  rm -f "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.upsun/local"
+  printf 'id: abc123\n' > "$PROJ/.upsun/local/project.yaml"
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    [ "$status" -ne 0 ]
+    printf '%s' "$output" | grep -qF 'Upsun Flex'
+    ! printf '%s' "$output" | grep -qF 'not on Upsun'
   done
 }
 

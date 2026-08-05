@@ -10,8 +10,26 @@ root="${root%/}"
 
 # shellcheck source=rdg/source-hash.sh
 source "$(dirname "${BASH_SOURCE[0]}")/source-hash.sh"
+# shellcheck source=rdg/mode.sh
+source "$(dirname "${BASH_SOURCE[0]}")/mode.sh"
 
 generated="$root/.ddev/config.platformsh.yaml"
+
+# --- native mode: nothing to guard ------------------------------------------
+# A repo that is not on Upsun has no upstream to drift from -- .ddev/config.yaml is
+# its source of truth -- so this guard has no job. Without this check it has a very
+# bad one: it fails, fail_on_hook_fail makes that fatal, and every 'ddev start'
+# aborts pointing at 'ddev rdg-sync', which then dies with "no .platform.app.yaml".
+# The project cannot be started at all.
+#
+# BOTH conditions, not just the first. If config.platformsh.yaml exists then this
+# repo was derived at some point, so a missing app config means it is broken --
+# moved, deleted, or nested deeper than derive.sh looks -- and must keep failing.
+# Testing only for the app config would let that repo slip quietly into native mode
+# and lose exactly the drift protection this guard exists to provide.
+if ! rdg_is_upsun_fixed "$root" && [ ! -f "$generated" ]; then
+  exit 0
+fi
 
 # rdg-sync is a host command that shells into the container, so it needs the project
 # up -- and this guard is what stopped it coming up. Always print the --skip-hooks

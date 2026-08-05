@@ -23,6 +23,34 @@ generated="$ddev_dir/config.platformsh.yaml"
 nginx_conf="$ddev_dir/nginx/platform-locations.conf"
 dockerfile="$ddev_dir/web-build/Dockerfile.rdg-theme"
 
+# --- native mode: say so, do nothing, succeed -------------------------------
+# Without this the command runs on to derive.sh and dies with "rdg-sync: no
+# .platform.app.yaml at ...", which reads as a broken install rather than as a
+# project that simply has nothing to derive. This message is where most people
+# will actually learn which file is the source of truth for their repo, so it
+# names both modes rather than only the one they are in.
+#
+# Ahead of the conflict pre-flight below on purpose: that check refuses when the
+# repo declares web_extra_daemons itself, which in native mode is exactly what the
+# repo is supposed to do -- there is no derived block for it to collide with.
+#
+# Exit 0. Running this on a native repo is not an error, it is a no-op, and a
+# non-zero status would make it one for any wrapper script that checks.
+# shellcheck source=rdg/mode.sh
+source "$rdg_dir/mode.sh"
+if ! rdg_is_upsun_fixed "$project_root"; then
+  cat <<'EOF'
+rdg-sync: this project is not on Upsun, so there is nothing to derive.
+
+  Edit .ddev/config.yaml directly, then run 'ddev restart'.
+
+On an Upsun project, .platform.app.yaml is the source of truth and this command
+regenerates .ddev/config.platformsh.yaml from it. This project has no
+.platform.app.yaml, so DDEV's own config is the only source of truth.
+EOF
+  exit 0
+fi
+
 # --- pre-flight: the repo must not declare these two keys itself -------------
 # DDEV APPENDS list keys when it merges .ddev/config*.yaml; it does not replace
 # them. So a hand-written web_extra_daemons / web_extra_exposed_ports block does

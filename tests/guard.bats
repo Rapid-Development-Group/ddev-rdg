@@ -54,6 +54,32 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "native mode: no app config and nothing generated, so the guard stands aside" {
+  # The bug this is the fix for: on a repo that was never on Upsun the guard failed,
+  # fail_on_hook_fail made that fatal, and every 'ddev start' aborted pointing at
+  # 'ddev rdg-sync' -- which then died with "no .platform.app.yaml". Unstartable.
+  rm -f "$PROJ/.platform.app.yaml"
+  rm -rf "$PROJ/.platform"
+  run bash "$SCRIPT" "$PROJ"
+  [ "$status" -eq 0 ]
+  # Silent: a hook that printed on every start of every native project would be
+  # noise, and there is nothing for the reader to act on.
+  [ -z "$output" ]
+}
+
+@test "a derived repo that lost its app config still fails, rather than going native" {
+  # Why the native check tests two signals. config.platformsh.yaml existing means
+  # this repo WAS derived, so a missing app config is breakage -- moved, deleted, or
+  # nested deeper than derive.sh looks -- not a native project. Slipping quietly
+  # into native mode here would drop the drift protection on a live Upsun project,
+  # which is precisely what the guard exists to provide.
+  write_generated
+  rm -f "$PROJ/.platform.app.yaml"
+  run bash "$SCRIPT" "$PROJ"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF "ddev rdg-sync"
+}
+
 @test "a source-files header with a normal multi-segment path still round-trips" {
   mkdir -p "$PROJ/web"
   printf '{}' > "$PROJ/web/package.json"

@@ -3,12 +3,38 @@
 Derives DDEV configuration from `.platform.app.yaml` and `.platform/services.yaml`,
 so runtime versions live in exactly one place.
 
+## Two modes
+
+Which file you edit depends on whether the repo is hosted on Upsun. The add-on works
+this out for itself, from whether a `.platform.app.yaml` exists at the repo root or one
+level below it.
+
+| | source of truth | `ddev rdg-sync` |
+|---|---|---|
+| **derived** — Upsun Fixed | `.platform.app.yaml` | regenerates `config.platformsh.yaml`; a `pre-start` guard refuses to start on stale values |
+| **native** — everything else | `.ddev/config.yaml`, hand-written | nothing to derive, and says so |
+
+In native mode the guard stands aside, `ddev rdg-sync` is a no-op that explains itself,
+and both `upsun-*-pull` commands refuse — there is no hosted environment behind the
+repo, so `ddev import-db --file=<dump>` is how a database arrives. What a native repo
+does get from the add-on is `rdg/theme-watch.sh` and the `corepack_enable` it needs;
+declare the daemon yourself as shown in
+[docs/dkr-to-ddev.md](docs/dkr-to-ddev.md#part-3-migrating-a-repo-that-is-not-on-upsun).
+
 **New to DDEV, or migrating a site off `dkr`?** Start with
 [docs/dkr-to-ddev.md](docs/dkr-to-ddev.md) — a walkthrough for people who know `dkr`
 and nothing about DDEV, covering both daily use and a one-time repo migration. The rest
 of this README is reference material for the add-on itself.
 
 ## Install
+
+On a **native** repo there is nothing to derive, so the dance below does not apply:
+
+    ddev add-on get Rapid-Development-Group/ddev-rdg
+    git add .ddev && git commit
+    ddev restart
+
+No `--skip-hooks`, no `ddev rdg-sync`. The rest of this section is for Upsun repos.
 
 First run, on a repo that has no `.ddev/config.platformsh.yaml` yet:
 
