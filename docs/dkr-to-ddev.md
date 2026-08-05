@@ -617,7 +617,9 @@ filesystem produces no inotify events) and the `arm64` libpng build flag. See
 (`gifsicle`, `optipng`, `mozjpeg`) ship x86_64-only prebuilts, so on Apple silicon yarn
 compiles them from source — and fails without the tools to do it. The symptom is the
 daemon crash-looping on `theme-watch: dependency install failed`, preceded a few lines
-earlier by the real cause, `Command failed: …/gifsicle/vendor/gifsicle --version`.
+earlier by the real cause — either `Command failed: …/gifsicle/vendor/gifsicle --version`
+(the prebuilt binary will not run) or `Command failed: /bin/sh -c autoreconf -ivf` (it
+fell back to building from source and the tools are absent).
 
 On Upsun repos `ddev rdg-sync` writes this file for you. Native repos maintain it by
 hand — `.ddev/web-build/Dockerfile.<something>`, since DDEV reads every
@@ -777,12 +779,64 @@ ddev exec 'mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS <name>;
   GRANT ALL ON \`<name>\`.* TO \"db\"@\"%\"; FLUSH PRIVILEGES;"'
 ```
 
+**A Drupal multisite needs new `sites.php` entries, not edited ones.** `smb-franchise-d9`
+is one: three sites under `sites/mm`, `sites/smc`, `sites/smr`, each with its own
+database. The existing keys look like they just need the domain swapped:
+
+```php
+$sites['8000.mm.docker.localhost'] = 'mm';
+```
+
+They do not. **That leading `8000` is the port**, because `DrupalKernel` builds its lookup
+key by moving the port to the front of the host. DDEV serves on 443 and sends no explicit
+port in `HTTP_HOST`, so its keys carry no prefix at all. Copy the `dkr` lines and swap the
+domain and you match *nothing* — every site silently falls through to `sites/default`,
+which in a multisite is usually the untouched scaffold with `$databases = []`.
+
+Add a DDEV block beside the `dkr` one rather than editing it, derived from the environment
+so a project rename cannot break it and it contributes nothing outside DDEV:
+
+```php
+if ($ddev_primary_url = getenv('DDEV_PRIMARY_URL')) {
+  $ddev_host = parse_url($ddev_primary_url, PHP_URL_HOST);
+  foreach (['mm', 'smc', 'smr'] as $ddev_site) {
+    $sites["$ddev_site.$ddev_host"] = $ddev_site;
+    $sites["ca.$ddev_site.$ddev_host"] = $ddev_site;
+  }
+  unset($ddev_primary_url, $ddev_host, $ddev_site);
+}
+```
+
+Verify it under FPM rather than only through `ddev drush -l`, and without needing a
+database, by asking Drupal itself. Drop this in the docroot, curl each hostname, delete
+it:
+
+```php
+<?php
+require_once __DIR__ . '/../vendor/autoload.php';
+printf("%s -> %s\n", $_SERVER['HTTP_HOST'],
+  Drupal\Core\DrupalKernel::findSitePath(
+    Symfony\Component\HttpFoundation\Request::createFromGlobals()));
+```
+
+On a multisite, also set **`disable_settings_management: true`**. DDEV otherwise writes
+`sites/default/settings.ddev.php` and appends an include for it to the tracked
+`sites/default/settings.php` — and in a multisite the real sites load their own
+`settings.php` and never read `sites/default` at all, so both are inert. The `$databases`
+block DDEV generates would be wrong here regardless, since each site needs its own.
+
 **Hostnames pinned in Drupal config, not just in nginx.** A second hostname is one line:
 
 ```yaml
 additional_hostnames:
     - ca.<project>          # -> https://ca.<project>.ddev.site
 ```
+
+Each entry is a full hostname **minus the TLD**, not a prefix — DDEV appends only
+`.ddev.site`. A bare `ca` there publishes `https://ca.ddev.site` and claims that name in
+the shared `*.ddev.site` namespace, where another project can collide with it. The
+symptom is a TLS error rather than a 404: the certificate covers the name DDEV actually
+published, not the one you meant.
 
 But if the site uses the Domain module, the local hostname is *also* a config entity —
 `conf/sync/domain_alias.alias.*.yml` with `pattern: 'docker.localhost:8000'`. Nothing
