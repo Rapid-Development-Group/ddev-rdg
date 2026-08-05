@@ -287,7 +287,6 @@ declared. It no longer does. `ddev rdg-sync` reads `.platform.app.yaml`,
 |---|---|
 | `.ddev/config.platformsh.yaml` | `php_version`, `nodejs_version`, `database`, `docroot`, `composer_root`, the theme daemon and its ports |
 | `.ddev/nginx/platform-locations.conf` | one `location ^~` block per `web.locations` entry outside the docroot |
-| `.ddev/web-build/Dockerfile.rdg-theme` | the native-build toolchain the asset pipeline needs |
 
 So **bumping a PHP version is a one-file edit to `.platform.app.yaml`**, and hosting
 config cannot drift from local config. All three generated files are committed
@@ -621,18 +620,15 @@ earlier by the real cause — either `Command failed: …/gifsicle/vendor/gifsic
 (the prebuilt binary will not run) or `Command failed: /bin/sh -c autoreconf -ivf` (it
 fell back to building from source and the tools are absent).
 
-On Upsun repos `ddev rdg-sync` writes this file for you. Native repos maintain it by
-hand — `.ddev/web-build/Dockerfile.<something>`, since DDEV reads every
-`web-build/Dockerfile.*`:
+**The add-on ships it** — `web-build/Dockerfile.rdg-theme-toolchain`, since v1.5.0, for
+every repo regardless of mode. Nothing to write, and nothing to derive. If you are
+looking at an older repo that still has a hand-written copy of these packages, or the
+`web-build/Dockerfile.rdg-theme` that `ddev rdg-sync` used to generate, delete it: the
+shipped file supersedes both.
 
-```dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    autoconf automake libtool dh-autoreconf make pkg-config zlib1g-dev \
- && rm -rf /var/lib/apt/lists/*
-```
-
-Adding it needs a `ddev restart`, and a stale `node_modules` from the failed installs is
-worth deleting first.
+Installing the add-on into a project that was already running rebuilds the web image, so
+this needs a `ddev restart`. A stale `node_modules` from the failed installs is worth
+deleting first — the failure is cached, so the daemon will keep reporting it until you do.
 
 ## 5. Teach `settings.php` about DDEV
 

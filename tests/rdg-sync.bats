@@ -42,7 +42,16 @@ if [ -n "${RDG_TEST_FAIL_ON:-}" ] && [ "${args[0]}" = "$RDG_TEST_FAIL_ON" ]; the
   echo "stub ddev: forced failure for '${args[0]}'" >&2
   exit 1
 fi
+# Lets a test simulate DDEV's own start/build output landing on stdout ahead of the
+# command's own output.
+if [ -n "${RDG_TEST_PREPEND:-}" ] && [ "${args[0]}" != "true" ]; then
+  printf '%s\n' "$RDG_TEST_PREPEND"
+fi
+
 case "${args[0]}" in
+  # The warm-up call rdg-sync makes before gathering, to absorb DDEV's own start
+  # output. It discards stdout, but the stub still has to succeed.
+  true) exit 0 ;;
   # No PHP on the test host, and the extension check only compares two lists.
   php) printf 'redis\napcu\n' ;;
   *)   "${args[@]}" ;;
@@ -223,6 +232,18 @@ YAML
   sync_run RDG_TEST_FAIL_ON=php
   [ "$status" -ne 0 ]
   diff -u "$BATS_TEST_TMPDIR/before" "$PROJ/.ddev/config.platformsh.yaml"
+}
+
+@test "refuses, and writes nothing, when the container output has noise prepended" {
+  # The failure this guards. 'ddev exec' starts and rebuilds the project when it is not
+  # up, and prints its own coloured progress to STDOUT, which the gather captured as part
+  # of the config. The written file then began with an ANSI escape and DDEV refused to
+  # parse the project at all -- "control characters are not allowed (value: 27)" -- which
+  # also broke the 'ddev rdg-sync' that would have repaired it.
+  RDG_TEST_PREPEND=$'Building project images...\033[32mdone\033[0m' sync_run
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'other than a derived config'
+  generated_files_absent
 }
 
 # --- housekeeping the writes do -------------------------------------------

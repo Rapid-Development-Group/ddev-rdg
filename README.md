@@ -1,7 +1,9 @@
 # ddev-rdg
 
-Derives DDEV configuration from `.platform.app.yaml` and `.platform/services.yaml`,
-so runtime versions live in exactly one place.
+Local DDEV setup shared across the fleet. On an Upsun repo it derives DDEV
+configuration from `.platform.app.yaml` and `.platform/services.yaml`, so runtime
+versions live in exactly one place; on a repo that is not on Upsun it supplies the parts
+that are the same everywhere and leaves `.ddev/config.yaml` to you.
 
 ## Two modes
 
@@ -17,8 +19,9 @@ level below it.
 In native mode the guard stands aside, `ddev rdg-sync` is a no-op that explains itself,
 and both `upsun-*-pull` commands refuse — there is no hosted environment behind the
 repo, so `ddev import-db --file=<dump>` is how a database arrives. What a native repo
-does get from the add-on is `rdg/theme-watch.sh` and the `corepack_enable` it needs;
-declare the daemon yourself as shown in
+does get is everything that is identical between repos: `rdg/theme-watch.sh`, the
+`corepack_enable` it needs, and `web-build/Dockerfile.rdg-theme-toolchain` for the
+asset pipeline's native builds. Only the daemon block itself is yours to declare, as in
 [docs/dkr-to-ddev.md](docs/dkr-to-ddev.md#part-3-migrating-a-repo-that-is-not-on-upsun).
 
 **New to DDEV, or migrating a site off `dkr`?** Start with
@@ -55,7 +58,7 @@ config, so the values `rdg-sync` just wrote take effect on the *next* start.
 
 `git add .ddev` rather than a file list: three generated files
 (`config.platformsh.yaml`, `nginx/platform-locations.conf`,
-`web-build/Dockerfile.rdg-theme`, the last two only when the repo needs them) and
+the second only when the repo needs it) and
 the add-on's own installed files all belong in the commit. A clone that has
 `config.platformsh.yaml` but not `rdg/theme-watch.sh` will crash-loop the theme
 daemon. DDEV's own `.ddev/.gitignore` already excludes what should not be tracked.
