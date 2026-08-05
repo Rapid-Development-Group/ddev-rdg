@@ -58,19 +58,20 @@ sync_run() {
 generated_files_absent() {
   [ ! -f "$PROJ/.ddev/config.platformsh.yaml" ]
   [ ! -f "$PROJ/.ddev/nginx/platform-locations.conf" ]
-  [ ! -f "$PROJ/.ddev/web-build/Dockerfile.rdg-theme" ]
 }
 
 # --- happy path --------------------------------------------------------------
 
-@test "writes all three generated files and matches the committed expected output" {
+@test "writes both generated files and matches the committed expected output" {
   sync_run
   [ "$status" -eq 0 ]
   diff -u "$REPO_ROOT/tests/expected/composable-subdir.config.platformsh.yaml" \
           "$PROJ/.ddev/config.platformsh.yaml"
   diff -u "$REPO_ROOT/tests/expected/composable-subdir.platform-locations.conf" \
           "$PROJ/.ddev/nginx/platform-locations.conf"
-  [ -f "$PROJ/.ddev/web-build/Dockerfile.rdg-theme" ]
+  # And writes no Dockerfile: since v1.5.0 the theme toolchain ships with the add-on
+  # rather than being generated per repo.
+  [ ! -e "$PROJ/.ddev/web-build/Dockerfile.rdg-theme" ]
 }
 
 @test "syncing twice in a row succeeds: its own output is not read as a conflict" {
@@ -226,11 +227,10 @@ YAML
 
 # --- housekeeping the writes do -------------------------------------------
 
-@test "the nginx snippet and Dockerfile are removed when the repo stops needing them" {
+@test "the nginx snippet is removed when the repo stops needing it" {
   sync_run
   [ "$status" -eq 0 ]
   [ -f "$PROJ/.ddev/nginx/platform-locations.conf" ]
-  [ -f "$PROJ/.ddev/web-build/Dockerfile.rdg-theme" ]
 
   # Drop the theme build and the extra web.location.
   rm "$PROJ/drupal/web/package.json"
@@ -251,7 +251,6 @@ YAML
   sync_run
   [ "$status" -eq 0 ]
   [ ! -f "$PROJ/.ddev/nginx/platform-locations.conf" ]
-  [ ! -f "$PROJ/.ddev/web-build/Dockerfile.rdg-theme" ]
 }
 
 @test "extensions that are all loaded produce no warning" {

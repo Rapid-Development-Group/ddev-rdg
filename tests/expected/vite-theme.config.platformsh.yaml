@@ -3,7 +3,6 @@
 # Change the runtime there, run 'ddev rdg-sync', and commit the result.
 # source-files: .platform.app.yaml .platform/services.yaml web/package.json
 # source-sha256: 529ab2a064ae9309c79b7085779459ee88a4ae3b1fd51ced51d731a59ddf4cbe
-# needs-theme-toolchain: yes
 php_version: "8.4"
 nodejs_version: "22"
 docroot: web

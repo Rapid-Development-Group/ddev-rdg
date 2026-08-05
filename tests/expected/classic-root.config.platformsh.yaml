@@ -3,7 +3,6 @@
 # Change the runtime there, run 'ddev rdg-sync', and commit the result.
 # source-files: .platform.app.yaml .platform/services.yaml public/package.json
 # source-sha256: 038b7f3f6037bf2c902984fcfcacbeec0b2ad58a279a04de213220eb7b4689a5
-# needs-theme-toolchain: no
 php_version: "8.2"
 docroot: public
 database:

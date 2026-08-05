@@ -281,9 +281,15 @@ golden() {
   [ "$(bash "$REPO_ROOT/rdg/derive.sh" "$p" 2>/dev/null | yq -r '.web_extra_daemons')" = "null" ]
 }
 
-@test "the theme toolchain marker is present only with a theme build" {
-  derive "$FIXTURES/composable-subdir" | grep -q '^# needs-theme-toolchain: yes$'
-  derive "$FIXTURES/no-theme" | grep -q '^# needs-theme-toolchain: no$'
+@test "no theme-toolchain marker is emitted: the toolchain is shipped, not derived" {
+  # Until v1.5.0 this header told rdg-sync whether to generate
+  # web-build/Dockerfile.rdg-theme. The toolchain now ships with the add-on
+  # unconditionally, so nothing should consume or emit the header -- a stray one would
+  # mean the two mechanisms had both come back.
+  local f
+  for f in composable-subdir no-theme classic-root vite-theme; do
+    ! derive "$FIXTURES/$f" | grep -q 'needs-theme-toolchain'
+  done
 }
 
 @test "package.json is included in the hashed source files" {

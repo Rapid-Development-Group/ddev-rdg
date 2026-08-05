@@ -233,7 +233,6 @@ cat <<EOF
 # source-files: ${hash_paths[*]}
 # source-sha256: $source_hash
 EOF
-printf '# needs-theme-toolchain: %s\n' "$theme_daemon"
 
 [ -n "$php_version" ]    && printf 'php_version: "%s"\n' "$php_version"
 [ -n "$nodejs_version" ] && printf 'nodejs_version: "%s"\n' "$nodejs_version"

@@ -3,7 +3,6 @@
 # Change the runtime there, run 'ddev rdg-sync', and commit the result.
 # source-files: drupal/.platform.app.yaml .platform/services.yaml drupal/web/package.json
 # source-sha256: 3d8e1ea8b7e6ba84fe817d80da0ede3c227ed23ca18616c8aa01f0c0c372ff02
-# needs-theme-toolchain: yes
 php_version: "8.3"
 nodejs_version: "20"
 docroot: drupal/web

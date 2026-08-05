@@ -119,15 +119,39 @@ shipped_files() {
   [ "$(yq -r '.corepack_enable' "$STATIC_CONFIG")" = "true" ]
 }
 
-@test "removal deletes the three generated files" {
+@test "removal deletes the files rdg-sync generates" {
   # They carry no #ddev-generated marker, so removal would otherwise leave
   # config.platformsh.yaml declaring a daemon whose script was just deleted, with
   # config.rdg.yaml gone so nothing complains: a project that starts crash-looping.
+  #
+  # The theme toolchain Dockerfile is deliberately NOT in this list any more: it ships
+  # with the add-on and carries the marker, so DDEV removes it itself.
   local actions
   actions="$(yq -r '.removal_actions[]' "$INSTALL")"
   printf '%s\n' "$actions" | grep -qF 'config.platformsh.yaml'
   printf '%s\n' "$actions" | grep -qF 'nginx/platform-locations.conf'
-  printf '%s\n' "$actions" | grep -qF 'web-build/Dockerfile.rdg-theme'
+}
+
+@test "the theme toolchain ships with the add-on, for every repo" {
+  # Native repos have no Upsun config to derive from, so a generated toolchain could
+  # never reach them -- each kept its own copy of the same three lines.
+  local entries
+  entries="$(yq -r '.project_files[]' "$INSTALL")"
+  printf '%s\n' "$entries" | grep -qx 'web-build/Dockerfile.rdg-theme-toolchain'
+  # The packages that actually matter; without autoconf/dh-autoreconf the imagemin
+  # build dies at 'autoreconf -ivf'.
+  local f="$REPO_ROOT/web-build/Dockerfile.rdg-theme-toolchain"
+  grep -qF 'autoconf' "$f"
+  grep -qF 'dh-autoreconf' "$f"
+  grep -qF 'zlib1g-dev' "$f"
+}
+
+@test "installing cleans up the Dockerfile rdg-sync used to generate" {
+  # The old generated file carries no marker, so DDEV will not remove it on upgrade and
+  # the toolchain would be installed twice.
+  local actions
+  actions="$(yq -r '.post_install_actions[]' "$INSTALL")"
+  printf '%s\n' "$actions" | grep -qF 'rm -f web-build/Dockerfile.rdg-theme'
 }
 
 @test "no shipped file has an active line that names webpack" {
