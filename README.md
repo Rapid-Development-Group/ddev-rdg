@@ -3,6 +3,11 @@
 Derives DDEV configuration from `.platform.app.yaml` and `.platform/services.yaml`,
 so runtime versions live in exactly one place.
 
+**New to DDEV, or migrating a site off `dkr`?** Start with
+[docs/dkr-to-ddev.md](docs/dkr-to-ddev.md) — a walkthrough for people who know `dkr`
+and nothing about DDEV, covering both daily use and a one-time repo migration. The rest
+of this README is reference material for the add-on itself.
+
 ## Install
 
 First run, on a repo that has no `.ddev/config.platformsh.yaml` yet:
