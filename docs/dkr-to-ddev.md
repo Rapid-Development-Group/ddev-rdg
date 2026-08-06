@@ -1073,6 +1073,45 @@ ddev aws s3 sync ~/MINIO-DATA/<project>/<bucket> s3://<bucket>/ --exclude ".mini
 Object data then lives in the add-on's named volume, not on your disk — so `ddev delete`
 takes it with the project, as it should.
 
+## serverless-offline hides your environment variables
+
+The single most expensive lesson in this whole exercise, because it looks like nothing is
+wrong.
+
+**serverless-offline gives each handler only the variables declared in
+`provider.environment`**, mirroring real Lambda's clean environment. A variable set on the
+container is invisible to handler code unless it is declared there:
+
+```yaml
+provider:
+  environment:
+    # Empty defaults so a deploy and dkr are both unaffected.
+    APP_DOMAIN: ${env:APP_DOMAIN, ''}
+    APP_BASE_URL: ${env:APP_BASE_URL, ''}
+```
+
+Without it the fallback silently wins, and only *inside lambdas*. The same code reading the
+same variable works correctly in a plain Node process — a Vite/TanStack server, a worker —
+because that has the full container environment. So it presents as a value that is
+demonstrably set (`docker exec … printenv APP_DOMAIN` proves it) and demonstrably ignored.
+
+On `tmt-ufl` this cost several cycles: links kept coming out as `docker.localhost:8000`,
+which looked like a stale webpack bundle, then like a caching problem, and was neither.
+`movetrac` had the identical latent bug — verified working through its app container while
+its lambdas quietly built survey links and PDF logo URLs against `localhost:8000`.
+
+**Then use `||`, not `??`.** With an empty-string default, `process.env.X` is `''` rather
+than `undefined`, and `'' ?? fallback` evaluates to `''`. Only `||` treats empty as absent.
+
+Two related caches, while you are here:
+
+- **`serverless-webpack` compiles into `.webpack/`, on the bind mount**, so a stale bundle
+  survives a container restart. `rm -rf backend/.webpack` when a source change appears to
+  have no effect. And note `nodemon -e yml` watches *only* YAML in these repos, so a
+  TypeScript edit relies on webpack's own watch.
+- **Grepping the built bundle for the old literal proves nothing** — it is still there as
+  the fallback string. Test behaviour instead.
+
 ## The two variables worth standardising
 
 Every one of these repos hardcodes a dev host and guesses the scheme. Both use the same
@@ -1171,6 +1210,29 @@ that meant a magic-link round trip; on `tmt-ufl`, the lead form rendering and
 Finally, confirm `dkr` still works, or at least that its inputs are untouched:
 `git status` clean for `docker-compose.yml` and `.env`, and every new variable falling back
 to the literal it replaced.
+
+**Do not trust an environment variable you only set.** Prove the app reads it — print what
+the code resolves, not what the container holds:
+
+```sh
+ddev exec -s backend node -e "console.log(process.env.APP_DOMAIN)"   # container env
+# then check what the app actually emitted, e.g. a generated link in the log
+```
+
+Those two disagreeing is the serverless-offline trap above.
+
+**Watch for state the browser keeps.** Re-running a funnel after a failure resumed the
+*previous* record from `localStorage`, so no new API call was made and the "retry" tested
+nothing. `playwright-cli cookie-clear && localstorage-clear && sessionstorage-clear`
+between attempts.
+
+**Magic-link flows log their URL.** Both Node repos authenticate by emailed link, and both
+log it locally. Do not grep with a tail limit — each request logs a dozen lines, so even
+`--tail=400` can miss it:
+
+```sh
+ddev logs -s app | grep -oE 'https?://[^ ]*(magic-link|continue)[^ ]*' | tail -1
+```
 
 ## Why there is no `ddev-node` add-on
 
