@@ -1100,6 +1100,22 @@ which looked like a stale webpack bundle, then like a caching problem, and was n
 `movetrac` had the identical latent bug — verified working through its app container while
 its lambdas quietly built survey links and PDF logo URLs against `localhost:8000`.
 
+**A page served over https may not open a `ws://` socket.** Browsers block it as mixed
+content, so any dev-mode websocket built as `ws://<host>:<port>` dies the moment DDEV
+serves TLS. Both these apps had one. Check what production does first — `tmt-ufl` already
+used `wss://<host>/ws/`, so DDEV took that shape rather than inventing one, proxied to the
+websocket port:
+
+```nginx
+location ^~ /ws/ {
+    proxy_pass http://backend:3001/;   # trailing slash strips the prefix
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_read_timeout 3600s;          # or an idle socket gets culled
+}
+```
+
 **Then use `||`, not `??`.** With an empty-string default, `process.env.X` is `''` rather
 than `undefined`, and `'' ?? fallback` evaluates to `''`. Only `||` treats empty as absent.
 
