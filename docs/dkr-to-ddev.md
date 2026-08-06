@@ -3,7 +3,7 @@
 For anyone who has used `dkr` and has never used DDEV. It assumes nothing about either
 beyond "I type `dkr up` and the site comes up".
 
-Three parts, and you probably want only one:
+Four parts, and you probably want only one:
 
 - **[Part 1: using a repo that already has DDEV](#part-1-using-a-repo-that-already-has-ddev)** —
   you cloned a site, it has a `.ddev/` directory, you want it running.
@@ -11,6 +11,8 @@ Three parts, and you probably want only one:
   site, by whoever does the migration.
 - **[Part 3: migrating a repo that is not on Upsun](#part-3-migrating-a-repo-that-is-not-on-upsun)** —
   same job, different half of the fleet.
+- **[Part 4: migrating a repo that is not PHP](#part-4-migrating-a-repo-that-is-not-php)** —
+  Node apps. Different enough that almost none of Parts 2 and 3 applies.
 
 ## Which kind of repo is this?
 
@@ -886,3 +888,245 @@ ddev drush --uri=https://ca.<project>.ddev.site \
 
 That `--uri` is also how you run any drush command against the second country, where
 under `dkr` it was the production URL.
+
+---
+
+# Part 4: migrating a repo that is not PHP
+
+For the Node repos — `movetrac`, `tmt-ufl` and the seven others in that family. Both of
+those are migrated; everything below is what they actually needed, not a guess.
+
+Almost none of Parts 2 and 3 applies. There is no `composer install`, no `settings.php`,
+no theme daemon, and **`ddev-rdg` is not wanted at all** — its native mode ships a Drupal
+theme watcher and `corepack_enable`, neither of which helps here.
+
+## What DDEV is actually buying you
+
+Worth being clear, because it is not "containers" — those already exist. It is:
+
+- `dkr up` requires the **1Password CLI** signed in (`op run -- docker compose up`), even
+  in repos with no `op://` references, and it **stops every other running stack** first.
+- **No published host ports**, so several projects run at once. This matters more here
+  than anywhere: `movetrac` alone wanted six ports and `tmt-ufl` eleven.
+- Trusted https, `ddev exec -s <service>`, and one command from a clean clone.
+
+## The config skeleton
+
+```yaml
+name: <project>
+type: generic
+docroot: ""            # no PHP to serve
+performance_mode: none # see below
+omit_containers: [db]  # ONLY if the app brings its own database
+```
+
+**`performance_mode: none`.** Mutagen exists to speed up reads from the web container, and
+here the app reads from its own containers via a plain bind mount. Syncing the whole repo,
+`node_modules` included, into a container that serves nothing is pure cost — on one attempt
+it filled Docker's disk and failed `ddev start` outright with `no space left on device`.
+
+**`omit_containers: [db]`.** `tmt-ufl` uses Mongo, so DDEV's MariaDB would idle forever;
+Mongo runs as its own service instead, since DDEV has no Mongo type. `movetrac` uses MySQL
+and keeps DDEV's `db`, pointing the app at it with `DB_HOST=db` — no source change, because
+that value already came from the environment.
+
+## Keep the compose service names
+
+This is the single most important rule. These apps resolve each other by **compose service
+name**, in source, with no environment override:
+
+```
+movetrac  backend/src/services/{webApi,documentApi}.ts  ->  http://mock:8080/<name>
+          backend/src/services/lambda.ts               ->  http://backend:3002
+          backend/serverless.yml                       ->  host: "backend"
+tmt-ufl   backend/src/services/db.ts                   ->  mongodb://mongo:27017/…
+          backend/src/services/s3.ts                   ->  http://minio:9001
+          backend/serverless.yml                       ->  endpoint: http://elasticmq:9324
+```
+
+Port the compose services into `.ddev/docker-compose.<something>.yaml` under **the same
+names** and every one of those keeps working untouched. That is also why these are not
+`web_extra_daemons` in DDEV's web container the way a Drupal theme watcher is: processes
+inside one container share a `localhost`, so each URL above would need editing.
+
+## Publish no ports. Then pick a routing shape
+
+Ports are the one thing that cannot be shared, and being able to run several projects at
+once is the whole point. Everything the browser touches goes through DDEV's router;
+everything else is container-to-container and needs no route at all.
+
+Two shapes, and **the app decides which** — look at how the frontend builds its API base.
+
+### A. One hostname per service
+
+For `movetrac`, where nothing couples the origins. Each service declares its own hostname
+and the router serves them all on 80/443, which it already owns:
+
+```yaml
+    environment:
+      VIRTUAL_HOST: app.${DDEV_SITENAME}.${DDEV_TLD}
+      HTTPS_EXPOSE: "443:8000"
+```
+
+```
+https://app.<project>.ddev.site     the app
+https://api.<project>.ddev.site     the API
+https://mock.<project>.ddev.site    the mock server
+```
+
+Do **not** add these to `additional_hostnames`: that routes a name to the **web**
+container, which beats a custom service claiming the same name on port 80. The symptom is
+every hostname answering `403` from DDEV's nginx. `VIRTUAL_HOST` alone is enough —
+`ddev.site` wildcard-resolves, so no DNS entry is needed either.
+
+Routing several services on *one* hostname instead would need a distinct host port each,
+and DDEV's router binds those on the host — straight back to the collisions this avoids.
+
+### B. One hostname, split by path
+
+For `tmt-ufl`, where `frontend/src/utils.js` builds its API base as
+`${window.location.origin}/ufllocal/api`. The backend **must** answer on the frontend's own
+origin, so shape A would break it. DDEV's router matches host and port only, so the split
+happens in nginx, in `.ddev/nginx/proxy.conf`:
+
+```nginx
+location ^~ /node_modules/ { proxy_pass http://frontend:8000; }
+
+location ~ ^/ufllocal/ {
+    proxy_pass http://backend:3000;   # prefix NOT stripped
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+}
+
+location ~ ^/ {
+    proxy_pass http://frontend:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;      # keeps HMR alive
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+
+Three things about that file are load-bearing:
+
+**`.ddev/nginx/`, not `nginx_full/` or `traefik/config/`.** Both of those carry a comment
+saying DDEV will respect them once you remove the `#ddev-generated` line. In practice DDEV
+**regenerates them whenever `.ddev/config.yaml` changes**, marker or not. That cost three
+debugging cycles, each presenting as the web container quietly answering `403` again.
+`.ddev/nginx/*.conf` is included inside DDEV's server block and never rewritten.
+
+**Regex locations, not prefixes.** DDEV's generated config already defines `location /`,
+and a second one is a duplicate. nginx evaluates regex locations before prefix matches and
+takes the first that matches, so `~ ^/` wins without touching the generated file.
+
+**`^~` for `/node_modules/`.** DDEV's config denies every path containing a dot-segment
+(`location ~* /\.(?!well-known\/) { deny all; }`) and Vite serves its pre-bundled deps from
+`/node_modules/.vite/deps/*`. That deny rule appears *before* your include, so a regex
+loses to it on ordering; `^~` outranks every regex location regardless of order. Symptom:
+the page loads, then 403s on `react.js` and every other dependency.
+
+## The two variables worth standardising
+
+Every one of these repos hardcodes a dev host and guesses the scheme. Both use the same
+two names now:
+
+| | |
+|---|---|
+| `APP_DOMAIN` | host:port, no scheme — for code that adds its own |
+| `APP_BASE_URL` | the full origin, scheme included |
+
+Always with the current literal as the fallback, so `dkr` is untouched:
+
+```ts
+export const appDomain = process.env.APP_DOMAIN ?? 'localhost:8000';
+export const appBaseUrl =
+  process.env.APP_BASE_URL ?? `${inDevelopment ? 'http' : 'https'}://${appDomain}`;
+```
+
+**Do the scheme too, not just the host.** `movetrac` had five places building
+`inDevelopment ? 'http' : 'https'` — an assumption that local dev is never TLS. DDEV serves
+https, so every one produced `http://` while the browser sent `Origin: https://`, and login
+failed with `Invalid origin`. Grep for that ternary before declaring a repo done.
+
+Then pick **one** scheme per service. If the origin check accepts only `APP_BASE_URL`, do
+not also expose http — it loads fine and then fails every login, which is exactly how that
+bug reached a user.
+
+Pick names `dkr` never sets. Reusing an existing variable that a committed `.env` already
+defines silently changes what `dkr` builds — `movetrac`'s `BETTER_AUTH_URL` was set in
+`backend/.env`, so `serverless.yml` reading `${env:BETTER_AUTH_URL}` would have moved dkr
+from `docker.localhost` to `localhost`.
+
+## Traps that cost a start each
+
+**A service bound to its own name is invisible to the router.** DDEV attaches a custom
+service to **two** networks — the project network and the router's — and binding the address
+`backend` resolves to covers only one. Both repos' `serverless.yml` did exactly that
+(`host: "backend"`), so container-to-container calls worked while everything through the
+router returned `502`. Fix with `host: ${env:SLS_OFFLINE_HOST, 'backend'}` and
+`SLS_OFFLINE_HOST: 0.0.0.0`. Shape B sidesteps it: nginx is on the project network too.
+
+**Vite refuses unknown hostnames.** Its defaults allow `localhost` and `*.localhost`, which
+is why `docker.localhost` needs nothing and `*.ddev.site` gets `Blocked request. This host
+is not allowed.` Add `allowedHosts`, env-driven so dkr keeps the defaults:
+
+```ts
+allowedHosts: process.env.VITE_ALLOWED_HOST ? [process.env.VITE_ALLOWED_HOST] : undefined,
+```
+
+**Do not swap a host bind-mount for a named volume.** `dkr` mounts
+`~/MINIO-DATA/$SITENAME` into minio, and that directory already holds the bucket the app
+expects. A fresh named volume has no bucket, and `serverless-offline-s3` has no
+`autoCreate` — only the sqs plugin does — so it waits forever. The symptom was the worst
+kind: webpack bundling cleanly and then **no error and no listener on port 3000**. Mount the
+same host directory; local uploads then survive switching stacks.
+
+**`DDEV_HOSTNAME` is a comma-separated list** of every hostname. Use `DDEV_PRIMARY_URL`, or
+`${DDEV_SITENAME}.${DDEV_TLD}`. Otherwise a project with extra hostnames yields
+`https://a,b:8000`, which curl rejects outright.
+
+**Cold installs surface breakage `dkr` was hiding.** `tmt-ufl` pins `sharp` 0.35.3, which
+demands node ≥ 20.9 against a node:18 image, so a cold `yarn` aborts. `dkr` never hit it
+because its `node_modules` volume was already warm — a fresh dkr clone would fail the same
+way. The repo's own start script already passes `--ignore-engines`; do the same rather than
+inventing a fix.
+
+## Diagnosing "it starts but nothing answers"
+
+The useful question is whether anything is listening, and these images have no `ss` or
+`netstat`:
+
+```sh
+docker exec ddev-<project>-<service> sh -c \
+  "grep ' 0A ' /proc/net/tcp | awk '{split(\$2,a,\":\"); print a[2]}' | sort -u"
+# hex: 0BB8 = 3000, 1F40 = 8000, 240D = 9229
+```
+
+"3000 is not listening while 9229 is" is what separates a startup problem from a routing
+one — and it is what pointed at the missing bucket above, after connectivity had already
+been proven fine.
+
+## Verify
+
+Run these; do not reason about them.
+
+```sh
+ddev start
+ddev exec -s <service> <the repo's own test command>
+```
+
+Then in a browser, because none of the above proves hydration or HMR: load the app, check
+the console, and exercise one real path end to end — a login, a form submit. On `movetrac`
+that meant a magic-link round trip; on `tmt-ufl`, the lead form rendering and
+`/ufllocal/api/lead/<id>` returning the app's own `401` rather than a `502`.
+
+Finally, confirm `dkr` still works, or at least that its inputs are untouched:
+`git status` clean for `docker-compose.yml` and `.env`, and every new variable falling back
+to the literal it replaced.
+
+## Why there is no `ddev-node` add-on
+
+Because there is nothing to put in it. Across two migrated repos the shared *code* is four
+lines of `config.yaml`; everything else — service names, commands, ports, volumes — is
+per-repo. What repeats is the knowledge above and the `APP_DOMAIN` / `APP_BASE_URL`
+convention, which is why this is a document rather than a package.
