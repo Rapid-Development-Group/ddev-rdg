@@ -1040,6 +1040,38 @@ ddev add-on get Rapid-Development-Group/ddev-rustfs
 ddev s3-init <bucket>
 ```
 
+**First, check nothing depends on MinIO's own APIs.** RustFS is S3-compatible, and that is
+not the same as MinIO-compatible. `tmt-ufl` triggers a lambda from `s3:ObjectCreated:*`,
+and `serverless-offline-s3` subscribes to it with one MinIO-proprietary call:
+
+```js
+const listener = this.client.listenBucketNotification(bucket, prefix, suffix, [event]);
+```
+
+Nothing in RustFS answers that. It has notifications, but a wholly different webhook design
+(`RUSTFS_NOTIFY_ENABLE`, `RUSTFS_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY`) that the plugin cannot
+consume — so no configuration bridges the two, and the failure is invisible: the upload
+succeeds, the object lands, and the handler simply never runs.
+
+Grep before you swap:
+
+```sh
+grep -rn "listenBucketNotification\|minio" backend/src backend/serverless.yml \
+  node_modules/*/src 2>/dev/null | grep -v node_modules/minio
+```
+
+`tmt-ufl` resolved it by patching the plugin to poll `ListObjects` instead — ~45 lines via
+`patch-package`, which removes the coupling rather than relocating it, so the plugin then
+works against any S3-compatible store. That is dev-only by construction: the plugin is a
+devDependency, no app source imports it, and its only hooks are `offline:start:*`, so
+`sls deploy` loads the module but never reaches the patched path. Add `patch-package` with a
+`postinstall` hook or the next `yarn` reverts it silently — which is how it would break again.
+
+**Verify S3 as an event source, not just as storage.** GET, PUT, presigned URLs and CORS
+can all pass while the event path is dead. The check is an upload followed by whatever the
+handler is supposed to produce — for `tmt-ufl`, the `thumbnails/` and `converted/`
+derivatives appearing beside the original.
+
 **The trap: the browser and the backend need different endpoints.** These apps hand
 temporary credentials to the client (`backend/src/services/sts.ts`) and the browser then
 uploads *directly* to S3 (`frontend/src/services/s3.ts`), so it cannot use the `rustfs`
@@ -1062,6 +1094,12 @@ Two things to test rather than assume, because RustFS is pre-1.0 and these apps 
 harder than a Drupal site does: an anonymous GET of an object, and a **SigV4 presigned
 URL**, which is what `@aws-sdk/s3-request-presigner` produces and the likeliest place a
 clone diverges. Both pass on `tmt-ufl`.
+
+**"Local" does not always mean offline.** `tmt-ufl`'s image recognition calls **real AWS
+Rekognition** from local dev, and succeeds: the AWS SDK reads credentials from a mounted
+`~/.aws` off disk, so stripped environment variables do not stop it, and the local stub is
+only an error fallback. Uploaded image bytes leave the machine. Worth knowing before
+assuming a local stack is self-contained.
 
 Migrating existing local objects is a one-off `sync`, and worth doing since these are the
 photos your test leads reference:
