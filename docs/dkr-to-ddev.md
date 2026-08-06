@@ -940,8 +940,8 @@ movetrac  backend/src/services/{webApi,documentApi}.ts  ->  http://mock:8080/<na
           backend/src/services/lambda.ts               ->  http://backend:3002
           backend/serverless.yml                       ->  host: "backend"
 tmt-ufl   backend/src/services/db.ts                   ->  mongodb://mongo:27017/…
-          backend/src/services/s3.ts                   ->  http://minio:9001
           backend/serverless.yml                       ->  endpoint: http://elasticmq:9324
+          backend/serverless.yml                       ->  host: "backend"
 ```
 
 Port the compose services into `.ddev/docker-compose.<something>.yaml` under **the same
@@ -1024,6 +1024,54 @@ takes the first that matches, so `~ ^/` wins without touching the generated file
 `/node_modules/.vite/deps/*`. That deny rule appears *before* your include, so a regex
 loses to it on ordering; `^~` outranks every regex location regardless of order. Symptom:
 the page loads, then 403s on `react.js` and every other dependency.
+
+## S3: one service, two endpoints
+
+Use the [`ddev-rustfs`](https://github.com/Rapid-Development-Group/ddev-rustfs) add-on
+rather than porting a `minio` service across. Beyond MinIO being AGPL with a
+progressively stripped console, it earns its place here for a specific reason:
+`serverless-offline-s3` has **no `autoCreate`** and hangs forever on a missing bucket —
+webpack bundles cleanly, then no error and nothing listening. `ddev s3-init <bucket>`
+creates it and sets a public-read policy, so the setup stops depending on a host directory
+happening to contain the right folder from `dkr`.
+
+```sh
+ddev add-on get Rapid-Development-Group/ddev-rustfs
+ddev s3-init <bucket>
+```
+
+**The trap: the browser and the backend need different endpoints.** These apps hand
+temporary credentials to the client (`backend/src/services/sts.ts`) and the browser then
+uploads *directly* to S3 (`frontend/src/services/s3.ts`), so it cannot use the `rustfs`
+service name — only the backend can.
+
+| | endpoint | why |
+|---|---|---|
+| backend | `http://rustfs:9000` | container-to-container, service name |
+| browser | `https://<project>.ddev.site:10101` | the add-on publishes the S3 API through DDEV's router |
+
+Under `dkr` both were `localhost:9001`, because the port was published. That is exactly the
+kind of value that keeps working right up until it reaches a browser: `tmt-ufl` shipped a
+migration with `localS3Endpoint = 'http://127.0.0.1:9001'` still in place, which loads
+nothing and uploads nothing under DDEV.
+
+Mind the frontend's env prefix — Vite only exposes variables matching `envPrefix`
+(`REACT_APP_` in `tmt-ufl`), and only via `import.meta.env`, not `process.env`.
+
+Two things to test rather than assume, because RustFS is pre-1.0 and these apps use S3
+harder than a Drupal site does: an anonymous GET of an object, and a **SigV4 presigned
+URL**, which is what `@aws-sdk/s3-request-presigner` produces and the likeliest place a
+clone diverges. Both pass on `tmt-ufl`.
+
+Migrating existing local objects is a one-off `sync`, and worth doing since these are the
+photos your test leads reference:
+
+```sh
+ddev aws s3 sync ~/MINIO-DATA/<project>/<bucket> s3://<bucket>/ --exclude ".minio.sys/*"
+```
+
+Object data then lives in the add-on's named volume, not on your disk — so `ddev delete`
+takes it with the project, as it should.
 
 ## The two variables worth standardising
 
