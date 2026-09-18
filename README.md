@@ -154,6 +154,32 @@ Delete those blocks first.
 asset daemon, the dev-server port, the build toolchain, and nginx snippets for
 `web.locations` outside the docroot.
 
+### Redis
+
+If the app relates a Redis service and the [`ddev-redis`](https://github.com/ddev/ddev-redis)
+add-on is installed, `ddev rdg-sync` also writes `.ddev/.env.redis` pinning
+`REDIS_DOCKER_IMAGE` to the version `.platform/services.yaml` declares.
+
+This is a second output file rather than another key in `config.platformsh.yaml`,
+because DDEV has no Redis version setting — the add-on reads that variable out of a
+dotenv file which docker-compose interpolates.
+
+It is worth deriving rather than leaving to the add-on's default. That default is a
+floating `redis:7`, and an unpinned major floats to whatever the newest minor is —
+`redis:8` resolved to 8.10 while the hosted service ran 8.0.6. Two Redis minors apart
+is not a difference worth meeting in production.
+
+Two things to know:
+
+- **Changing the version needs the cache volume dropped**, at least downwards. Redis
+  writes its snapshot in a version-specific format and an older server refuses a newer
+  one (`Can't handle RDB format version 15`). It is a cache, so
+  `ddev stop && docker volume rm ddev-<project>_redis && ddev start`.
+- **`ddev redis-backend` and this command both own that file.** Switching backend by
+  hand — to Valkey, say — is overwritten on the next sync. Change the service version in
+  `.platform/services.yaml` instead; that is the source of truth, and a `valkey:` service
+  type derives to the Valkey image on its own.
+
 ## What it does not translate
 
 Crons, mounts, workers, and build/deploy hooks. `ddev rdg-sync` lists these so the
