@@ -21,6 +21,7 @@ rdg_dir="$ddev_dir/rdg"
 
 generated="$ddev_dir/config.platformsh.yaml"
 nginx_conf="$ddev_dir/nginx/platform-locations.conf"
+redis_env="$ddev_dir/.env.redis"
 
 # --- native mode: say so, do nothing, succeed -------------------------------
 # Without this the command runs on to derive.sh and dies with "rdg-sync: no
@@ -177,6 +178,15 @@ if [ -n "$docroot" ]; then
   locations="$(run_in_container bash /mnt/ddev_config/rdg/nginx-locations.sh "/var/www/html/$app_config_rel" "$docroot")"
 fi
 
+# Only when the ddev-redis add-on is actually installed. Without it there is no
+# docker-compose file reading REDIS_DOCKER_IMAGE, and writing a dotenv for a
+# service the project does not run is litter.
+redis_image=""
+if [ -f "$ddev_dir/docker-compose.redis.yaml" ]; then
+  redis_image="$(run_in_container bash /mnt/ddev_config/rdg/derive-redis.sh \
+    "/var/www/html/$app_config_rel" /var/www/html/.platform/services.yaml)"
+fi
+
 # Deliberately a check, not a config write. Deriving `php<ver>-<ext>` packages
 # adds redundancy -- DDEV's image already ships redis and apcu -- and risks a
 # package name that does not exist. Both the declared list and the loaded list
@@ -201,6 +211,33 @@ if [ -n "$locations" ]; then
   echo "Wrote nginx/$(basename "$nginx_conf")"
 else
   rm -f "$nginx_conf"
+fi
+
+# The ddev-redis add-on defaults to a floating 'redis:7' and takes an override
+# from this dotenv file, which docker-compose interpolates. Nothing in DDEV's own
+# config can express it, so this is a second output rather than another key in
+# config.platformsh.yaml.
+#
+# Worth deriving rather than leaving to the default: an unpinned major floats to
+# whatever the newest minor is, which is not what the hosted service runs. The
+# two being minors apart is a difference you would rather not meet in production.
+if [ -n "$redis_image" ]; then
+  cat > "$redis_env" <<REDIS_ENV
+#ddev-generated
+# Derived by 'ddev rdg-sync' from .platform/services.yaml. Do not edit -- change
+# the service version there, re-run 'ddev rdg-sync', and commit the result.
+#
+# Changing this needs the cache volume dropped, at least downwards: Redis writes
+# its snapshot in a version-specific format and an older server refuses a newer
+# file ("Can't handle RDB format version N"). It is a cache, so:
+#   ddev stop && docker volume rm ddev-<project>_redis && ddev start
+REDIS_DOCKER_IMAGE="$redis_image"
+REDIS_ENV
+  echo "Wrote $(basename "$redis_env")"
+elif [ -f "$redis_env" ] && grep -q '#ddev-generated' "$redis_env"; then
+  # The project stopped relating a Redis service, or the add-on was removed.
+  # Only ever remove our own file; a hand-written override is the developer's.
+  rm -f "$redis_env"
 fi
 
 # The theme build toolchain is NOT generated here. It ships with the add-on as

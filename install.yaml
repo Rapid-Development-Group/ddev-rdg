@@ -45,3 +45,8 @@ removal_actions:
   - |
     #ddev-nodisplay
     rm -f nginx/platform-locations.conf
+  - |
+    #ddev-nodisplay
+    # Guarded, unlike the two above: 'ddev redis-backend' writes this same file
+    # without the marker, and that one is the developer's, not ours.
+    if [ -f .env.redis ] && grep -q '#ddev-generated' .env.redis; then rm -f .env.redis; fi
