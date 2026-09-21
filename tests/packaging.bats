@@ -240,13 +240,58 @@ shipped_files() {
   [ ! -f "$proj/.ddev/config.mailpit.yaml" ]
 }
 
-@test "a config.yaml with no name is declined rather than guessed at" {
-  local proj="$BATS_TEST_TMPDIR/noname"
+@test "a config.yaml with no name takes the enclosing directory, as DDEV does" {
+  # Omitting 'name:' is how one repo runs as several projects at once -- a
+  # worktree per branch, each its own stack -- so this is a normal configuration,
+  # and DDEV names such a project after its directory. Guessing differently here
+  # would point mailpit.<project>.ddev.site at the application, which answers 200.
+  local proj="$BATS_TEST_TMPDIR/rdg2020-vite"
   mkdir -p "$proj/.ddev"
   printf 'type: drupal11\n' > "$proj/.ddev/config.yaml"
   run bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
   [ "$status" -eq 0 ]
-  [ ! -f "$proj/.ddev/config.mailpit.yaml" ]
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.rdg2020-vite" ]
+  [ "$(yq -r '.http.services."rdg2020-vite-mailpit-ui".loadbalancer.servers[0].url' \
+      "$proj/.ddev/traefik/config/mailpit.yaml")" = "http://ddev-rdg2020-vite-web:8025" ]
+}
+
+@test "the enclosing directory is resolved when .ddev is given as a relative path" {
+  # install.yaml calls this as 'bash rdg/mailpit-hostname.sh .' with .ddev as the
+  # working directory. dirname of '.' is '.', so a naive parent lookup names the
+  # .ddev directory itself and every project in the fleet would be called 'ddev'.
+  local proj="$BATS_TEST_TMPDIR/relative-case"
+  mkdir -p "$proj/.ddev"
+  printf 'type: drupal11\n' > "$proj/.ddev/config.yaml"
+  run bash -c "cd '$proj/.ddev' && bash '$REPO_ROOT/rdg/mailpit-hostname.sh' ."
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.relative-case" ]
+}
+
+@test "a name carrying capitals is lowercased in the host but not in the container" {
+  # DDEV accepts such a name rather than refusing it, and is itself inconsistent:
+  # 'Rdg2020-Bad' gets the container 'ddev-Rdg2020-Bad-web' behind the rule
+  # 'HostRegexp(`^rdg2020-bad.ddev.site$`)'. Following only one of the two gives
+  # either a rule that never matches or a service pointing at no container.
+  local proj="$BATS_TEST_TMPDIR/Rdg2020-Bad"
+  mkdir -p "$proj/.ddev"
+  printf 'type: drupal11\n' > "$proj/.ddev/config.yaml"
+  run bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"https://mailpit.rdg2020-bad.ddev.site"* ]]
+
+  local r="$proj/.ddev/traefik/config/mailpit.yaml"
+  grep -qF 'rule: HostRegexp(`^mailpit\.rdg2020-bad\.ddev\.site$`)' "$r"
+  grep -qF 'url: http://ddev-Rdg2020-Bad-web:8025' "$r"
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.rdg2020-bad" ]
+}
+
+@test "an explicit name still wins over the directory it sits in" {
+  local proj="$BATS_TEST_TMPDIR/some-directory"
+  mkdir -p "$proj/.ddev"
+  printf 'name: explicit\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
+  bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.explicit" ]
+  ! grep -qF some-directory "$proj/.ddev/traefik/config/mailpit.yaml"
 }
 
 @test "a quoted project name is unquoted before it reaches the hostname" {

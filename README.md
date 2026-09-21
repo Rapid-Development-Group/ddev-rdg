@@ -191,6 +191,55 @@ merging `.ddev/config*.yaml`, so a hand-written block would survive alongside th
 derived one and DDEV would reject the project for a duplicate `container_port`.
 Delete those blocks first.
 
+### Running several checkouts of one repo at once
+
+A worktree per branch, or two clones side by side, each up in the browser at the same
+time. **Omit `name:` from `.ddev/config.yaml`** and DDEV names the project after the
+enclosing directory, which is the only thing that has to differ:
+
+    git worktree add ../rdg2020-vite vite
+    cd ../rdg2020-vite && ddev start        # https://rdg2020-vite.ddev.site
+
+The name is not cosmetic. It builds the container names, the hostname, and the database
+volume (`<project>-mariadb`), so two directories sharing one name share one database and
+whichever started last owns it. DDEV refuses that outright — *"Project 'x' was found in
+configured directory … and it is already used by project 'x'"* — which is why a repo that
+pins `name:` can only ever be checked out once.
+
+Nothing else needs changing. Every port goes through the one shared `ddev-router` and is
+routed by `Host`, the derived theme dev-server on 35728/35729 included, so the checkouts
+do not contend for ports. Mailpit follows the project name, so each gets its own
+`https://mailpit.<project>.ddev.site`.
+
+Keep the directory name to lowercase letters, digits and hyphens, and slug a branch
+that is not:
+
+    git worktree add ../rdg2020-op-500 OP-500-rdg-theme
+
+DDEV will not stop you if you do not — v1.25.4 accepted `Bad.Name` even from
+`--project-name` — but the name becomes a hostname, and a dot in it makes
+`<name>.ddev.site` three labels, which the `*.ddev.site` wildcard certificate does not
+cover. Capitals do work, awkwardly: DDEV lowercases them in the hostname and keeps them
+in the container and volume names.
+
+A branch-derived name is deliberately *not* what this does. It would rename the project
+on every `git checkout` in the primary checkout, orphaning that branch's containers and
+volume and handing you an empty database under a new name. The directory is the stable
+discriminator; with the command above the branch rides along in it anyway.
+
+Two things do not come with a new checkout, both because they are gitignored:
+
+- **The database.** A new name gets a new, empty volume. Either pull again, or hop:
+
+      ddev -d ~/Sites/rdg2020 export-db --file=/tmp/db.sql.gz
+      ddev -d ~/Sites/rdg2020-vite import-db --file=/tmp/db.sql.gz
+
+- **The Upsun link file** — `.platform/local/project.yaml`, or `.upsun/local/project.yaml`
+  on Flex. Without it `ddev upsun-db-pull` has no project id to resolve and fails saying
+  nothing about worktrees. Copy the directory across once:
+
+      cp -r ~/Sites/rdg2020/.platform/local ~/Sites/rdg2020-vite/.platform/
+
 ## Mailpit on a hostname
 
 Installing the add-on puts Mailpit's UI at `https://mailpit.<project>.ddev.site`, in
@@ -214,9 +263,14 @@ Two generated files, neither carrying `#ddev-generated` (DDEV regenerates
 and the port-based URL keeps working.
 
 Both embed the project name, so `ddev rdg-sync` rewrites them every run and a rename
-self-heals. On a native repo, re-run `ddev add-on get` after a rename. A project name
-that is not a DNS label, or a `config.yaml` with no `name:`, is declined out loud and
-Mailpit keeps its port-based URL.
+self-heals. On a native repo, re-run `ddev add-on get` after a rename. The name comes
+from `config.yaml` when it declares one and from the enclosing directory when it does
+not — the same two places DDEV takes it from, so a checkout that omits `name:` to
+[run alongside its siblings](#running-several-checkouts-of-one-repo-at-once) still gets
+its own Mailpit. A name that is not a DNS label is declined out loud and Mailpit keeps
+its port-based URL — DDEV does not refuse such a project, so this is the only thing that
+says anything. A name carrying capitals is served: the hostname is lowercased and the
+container name is not, matching what DDEV does for the project's own routers.
 
 ## What it derives
 
