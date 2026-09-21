@@ -6,6 +6,7 @@ project_files:
   - rdg/
   - config.rdg.yaml
   - providers/platform.yaml
+  - providers/upsun.yaml
   - commands/host/rdg-sync
   - commands/host/upsun-db-pull
   - commands/host/upsun-files-pull
@@ -35,13 +36,15 @@ post_install_actions:
 # script has just been deleted, with config.rdg.yaml gone too so no guard complains.
 # The project would come up and crash-loop. Delete them with the add-on.
 #
-# providers/platform.yaml is deliberately NOT listed: removal is marker-gated, and
-# that file omits the marker on purpose so DDEV never regenerates it. It is left
-# behind; delete it by hand if unwanted.
+# providers/platform.yaml and providers/upsun.yaml are deliberately NOT listed:
+# removal is marker-gated, and both files omit the marker on purpose so DDEV never
+# regenerates them. They are left behind; delete them by hand if unwanted.
 removal_actions:
   - |
     #ddev-nodisplay
-    rm -f config.platformsh.yaml
+    # Both names: a repo is one shape or the other, but a repo that changed shape
+    # can briefly hold both, and neither carries the #ddev-generated marker.
+    rm -f config.platformsh.yaml config.upsun.yaml
   - |
     #ddev-nodisplay
     rm -f nginx/platform-locations.conf

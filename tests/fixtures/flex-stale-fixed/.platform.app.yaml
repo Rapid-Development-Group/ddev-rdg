@@ -1,0 +1,16 @@
+# LEFTOVER. Pre-conversion, never deployed from again. Nothing here may reach
+# the derived config: php 8.1 against Flex's 8.4, node 18 against 22, and a
+# docroot one directory over.
+name: drupal
+type: 'php:8.1'
+dependencies:
+    nodejs:
+        nodejs: "18"
+relationships:
+    database: 'olddb:mysql'
+    redis: 'oldredis:redis'
+web:
+    locations:
+        '/':
+            root: 'public'
+            passthru: '/index.php'

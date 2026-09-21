@@ -8,7 +8,8 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   INSTALL="$REPO_ROOT/install.yaml"
   STATIC_CONFIG="$REPO_ROOT/config.rdg.yaml"
-  PROVIDER="$REPO_ROOT/providers/platform.yaml"
+  PROVIDERS="$REPO_ROOT/providers/platform.yaml
+$REPO_ROOT/providers/upsun.yaml"
 }
 
 # Expands project_files into the concrete file list DDEV would copy into .ddev/.
@@ -22,11 +23,11 @@ shipped_files() {
   done < <(yq -r '.project_files[]' "$INSTALL")
 }
 
-@test "every shipped file carries DDEV's generated marker, except the pull provider" {
+@test "every shipped file carries DDEV's generated marker, except the pull providers" {
   # The Critical finding this guards: without the marker DDEV silently overwrites
   # a shipped file on the next start (it searches the whole file for the string,
-  # not just line 1). The provider is the deliberate exception -- it is ours, and
-  # the marker is what would make DDEV revert our recipe.
+  # not just line 1). The two provider recipes are the deliberate exception -- they
+  # are ours, and the marker is what would make DDEV revert them.
   local f count=0 failed=""
   while IFS= read -r f; do
     count=$((count + 1))
@@ -35,7 +36,7 @@ shipped_files() {
   listed in project_files but does not exist: $f"
       continue
     fi
-    if [ "$f" = "$PROVIDER" ]; then
+    if printf '%s\n' "$PROVIDERS" | grep -qxF "$f"; then
       if grep -qF '#ddev-generated' "$f"; then
         failed="$failed
   must NOT carry the marker (DDEV would overwrite our recipe): $f"
@@ -65,6 +66,10 @@ shipped_files() {
   printf '%s\n' "$entries" | grep -qx 'rdg/'
   printf '%s\n' "$entries" | grep -qx 'config.rdg.yaml'
   printf '%s\n' "$entries" | grep -qx 'providers/platform.yaml'
+  # The Upsun Flex counterpart. Its absence would leave 'ddev upsun-db-pull' on a
+  # Flex repo resolving to DDEV's stock recipe, which downloads every mount to the
+  # wrong place and still carries both push commands.
+  printf '%s\n' "$entries" | grep -qx 'providers/upsun.yaml'
 }
 
 @test "the shipped file list covers every script rdg-sync and the guard invoke" {
@@ -129,6 +134,10 @@ shipped_files() {
   local actions
   actions="$(yq -r '.removal_actions[]' "$INSTALL")"
   printf '%s\n' "$actions" | grep -qF 'config.platformsh.yaml'
+  # Both generated names. A repo is one shape or the other, but neither file
+  # carries the marker, so removal has to name both or a converted repo keeps the
+  # one it is no longer generating.
+  printf '%s\n' "$actions" | grep -qF 'config.upsun.yaml'
   printf '%s\n' "$actions" | grep -qF 'nginx/platform-locations.conf'
 }
 

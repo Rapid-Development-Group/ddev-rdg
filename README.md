@@ -1,25 +1,50 @@
 # ddev-rdg
 
 Local DDEV setup shared across the fleet. On an Upsun repo it derives DDEV
-configuration from `.platform.app.yaml` and `.platform/services.yaml`, so runtime
-versions live in exactly one place; on a repo that is not on Upsun it supplies the parts
-that are the same everywhere and leaves `.ddev/config.yaml` to you.
+configuration from the hosting config, so runtime versions live in exactly one place;
+on a repo that is not on Upsun it supplies the parts that are the same everywhere and
+leaves `.ddev/config.yaml` to you.
 
-## Two modes
+## Three shapes
 
-Which file you edit depends on whether the repo is hosted on Upsun. The add-on works
-this out for itself, from whether a `.platform.app.yaml` exists at the repo root or one
-level below it.
+Which file you edit depends on how — and whether — the repo is hosted on Upsun. The
+add-on works this out for itself, from which tracked config files exist.
 
-| | source of truth | `ddev rdg-sync` |
-|---|---|---|
-| **derived** — Upsun Fixed | `.platform.app.yaml` | regenerates `config.platformsh.yaml`; a `pre-start` guard refuses to start on stale values |
-| **native** — everything else | `.ddev/config.yaml`, hand-written | nothing to derive, and says so |
+| | source of truth | `ddev rdg-sync` | `ddev upsun-*-pull` |
+|---|---|---|---|
+| **fixed** — Upsun Fixed | `.platform.app.yaml` + `.platform/services.yaml` | regenerates `config.platformsh.yaml` | `platform` provider |
+| **flex** — Upsun Flex | `.upsun/config.yaml` | regenerates `config.upsun.yaml` | `upsun` provider |
+| **native** — everything else | `.ddev/config.yaml`, hand-written | nothing to derive, and says so | refused |
+
+In both derived shapes a `pre-start` guard refuses to start on stale values.
+
+Precedence, when more than one signal is present:
+
+    .ddev/rdg-native  >  .upsun/config.yaml  >  RDG_APP_ROOT  >  .platform.app.yaml
+
+**Flex beats every Fixed signal**, and that ordering is load-bearing rather than
+arbitrary. `upsun convert` rewrites the tracked files, but nothing cleans up what was
+never tracked: a converted repo keeps `.platform/local/project.yaml` naming the
+pre-conversion project, and a repo converted on a branch has `.platform.app.yaml` back
+the moment anyone checks out `master`. Deriving from those would pin PHP and database
+versions to dead config and point `ddev pull` at a project id that no longer exists —
+confidently, and with nothing in the output to say so. Only the tracked
+`.upsun/config.yaml` decides; the gitignored link files never do, which is also why a
+fresh clone with no `.upsun/local/project.yaml` still resolves correctly.
 
 A repo carrying a `.platform.app.yaml` it does not actually deploy from — an abandoned
 Platform.sh evaluation, with no `.platform/local/project.yaml` and an AWS buildspec
 instead — should declare itself: `touch .ddev/rdg-native` and commit it. That forces
 native mode and beats every other signal, `RDG_APP_ROOT` included.
+
+### Which application, on Flex
+
+A Flex config can declare several applications under `applications:`. With one, it is
+used. With several, `ddev rdg-sync` refuses and names them; set `RDG_APP` to choose:
+
+    RDG_APP=drupal ddev rdg-sync
+
+`RDG_APP_ROOT` is its Upsun Fixed counterpart and means nothing on a Flex repo.
 
 In native mode the guard stands aside, `ddev rdg-sync` is a no-op that explains itself,
 and both `upsun-*-pull` commands refuse — there is no hosted environment behind the
@@ -61,8 +86,8 @@ sync, `ddev start` works normally.
 `ddev restart` is not optional. A `pre-start` hook runs after DDEV has parsed the
 config, so the values `rdg-sync` just wrote take effect on the *next* start.
 
-`git add .ddev` rather than a file list: three generated files
-(`config.platformsh.yaml`, `nginx/platform-locations.conf`,
+`git add .ddev` rather than a file list: the generated files
+(`config.platformsh.yaml` or `config.upsun.yaml`, `nginx/platform-locations.conf`,
 the second only when the repo needs it) and
 the add-on's own installed files all belong in the commit. A clone that has
 `config.platformsh.yaml` but not `rdg/theme-watch.sh` will crash-loop the theme
@@ -86,9 +111,10 @@ installed from until someone re-runs the install.
 
 Three things to expect:
 
-- **`providers/platform.yaml` is skipped**, loudly: *"NOT overwriting … The
-  #ddev-generated signature was not found."* Correct and harmless — that file omits the
-  marker on purpose. To take a new version of it, delete it first and re-run.
+- **`providers/platform.yaml` and `providers/upsun.yaml` are skipped**, loudly: *"NOT
+  overwriting … The #ddev-generated signature was not found."* Correct and harmless —
+  those files omit the marker on purpose. To take a new version, delete it first and
+  re-run.
 - **Upgrading does not re-derive.** `config.platformsh.yaml` is only rewritten by
   `ddev rdg-sync`, so run that too when a release changes the derivation. The pre-start
   guard hashes only the *source* files, so it will not catch this for you.
@@ -111,13 +137,25 @@ and its `--skip-db` counterpart, so choosing an environment costs one word inste
 sixty characters.
 
 Named `upsun-*` because that is what the service is called now, whichever plan a
-project is on. **Upsun Fixed** — the rebranded Platform.sh, with a `.platform/`
-directory and the `platform` CLI — is what these support, and DDEV's `platform`
-provider is what they invoke. **Upsun Flex** projects (`.upsun/config.yaml`, the
-`upsun` CLI) are detected via `.upsun/local/project.yaml` and **refused**, rather than
-falling through to DDEV's stock `upsun` recipe: that recipe downloads every mount to
-`/var/www/html` and still ships `db_push_command` and `files_push_command`, so using it
-silently would restore a production push path this add-on removed on purpose.
+project is on. Both shapes are supported, and the shape decides the provider:
+
+- **Upsun Fixed** — the rebranded Platform.sh: `.platform/`, the `platform` CLI,
+  `PLATFORMSH_CLI_TOKEN`, DDEV's `platform` provider.
+- **Upsun Flex** — `.upsun/config.yaml`, the `upsun` CLI, `UPSUN_CLI_TOKEN`, DDEV's
+  `upsun` provider.
+
+Neither uses DDEV's stock recipe. Both `providers/platform.yaml` and
+`providers/upsun.yaml` are vetted copies with two changes: `files_import_command`
+downloads the one public-files mount into `$DDEV_FILES_DIR` rather than every mount
+into `/var/www/html` (mount paths are relative to the *app* root, so the stock version
+puts public files beside the docroot and drags down `private/` with them), and
+`db_push_command` / `files_push_command` are deleted. Both files omit the
+`#ddev-generated` marker so DDEV never reverts them.
+
+Which provider is chosen comes from the tracked hosting config, never from
+`.upsun/local/project.yaml` or `.platform/local/project.yaml` — both are gitignored, so
+a fresh clone has neither, and a converted repo keeps the *Fixed* one pointing at a
+dead project.
 
 With no argument neither command passes `--environment` at all, so whatever the project
 pins in its own `.ddev/config.yaml` applies — deliberately not hardcoded to `master`,
@@ -154,11 +192,18 @@ Delete those blocks first.
 asset daemon, the dev-server port, the build toolchain, and nginx snippets for
 `web.locations` outside the docroot.
 
+One exception in that last item: a location declaring `scripts: true` is a PHP entry
+point, which needs `fastcgi_pass` and a `SCRIPT_FILENAME` rather than the static
+`try_files` block this generates. Those are skipped and named on stderr — write them by
+hand in `.ddev/nginx/*.conf`, which is the hook DDEV does not regenerate.
+
 ### Redis
 
 If the app relates a Redis service and the [`ddev-redis`](https://github.com/ddev/ddev-redis)
 add-on is installed, `ddev rdg-sync` also writes `.ddev/.env.redis` pinning
-`REDIS_DOCKER_IMAGE` to the version `.platform/services.yaml` declares.
+`REDIS_DOCKER_IMAGE` to the version the repo's services config declares —
+`.platform/services.yaml` on Fixed, the `services:` block of `.upsun/config.yaml` on
+Flex.
 
 This is a second output file rather than another key in `config.platformsh.yaml`,
 because DDEV has no Redis version setting — the add-on reads that variable out of a
@@ -177,8 +222,8 @@ Two things to know:
   `ddev stop && docker volume rm ddev-<project>_redis && ddev start`.
 - **`ddev redis-backend` and this command both own that file.** Switching backend by
   hand — to Valkey, say — is overwritten on the next sync. Change the service version in
-  `.platform/services.yaml` instead; that is the source of truth, and a `valkey:` service
-  type derives to the Valkey image on its own.
+  the services config instead; that is the source of truth, and a `valkey:` service type
+  derives to the Valkey image on its own.
 
 ## What it does not translate
 
@@ -198,9 +243,21 @@ regenerate the goldens and read the diff before committing it:
       bash rdg/derive.sh "tests/fixtures/$f" 2>/dev/null \
         > "tests/expected/$f.config.platformsh.yaml"
     done
+    for f in flex-subdir flex-stale-fixed; do
+      bash rdg/derive.sh "tests/fixtures/$f" 2>/dev/null \
+        > "tests/expected/$f.config.upsun.yaml"
+    done
     bash rdg/nginx-locations.sh \
       tests/fixtures/composable-subdir/drupal/.platform.app.yaml drupal/web \
       > tests/expected/composable-subdir.platform-locations.conf
+    bash rdg/nginx-locations.sh \
+      tests/fixtures/flex-subdir/.upsun/config.yaml drupal/web drupal 2>/dev/null \
+      > tests/expected/flex-subdir.platform-locations.conf
+
+`flex-stale-fixed` is the one fixture worth understanding before editing: it is a Flex
+repo carrying leftover Fixed files whose every value differs from the Flex one, so a
+derivation that reads the wrong file fails the golden diff instead of passing by
+coincidence.
 
 `tests/rdg-sync.bats` drives `commands/host/rdg-sync` with a stub `ddev` on
 `PATH`, so it needs no running project.

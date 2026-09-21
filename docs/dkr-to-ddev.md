@@ -17,16 +17,26 @@ Four parts, and you probably want only one:
 ## Which kind of repo is this?
 
 Parts 2 and 3 differ in one thing only — **which file is the source of truth** — and
-everything else follows from it. Check for a `.platform.app.yaml`, at the repo root or
-one directory below it:
+everything else follows from it. Look at which tracked config files the repo has:
 
-| | hosted on | source of truth | `ddev rdg-sync` | `ddev upsun-db-pull` |
+| | hosted on | source of truth | `ddev rdg-sync` writes | `ddev upsun-db-pull` |
 |---|---|---|---|---|
-| **derived** | Upsun Fixed | `.platform.app.yaml` | regenerates DDEV config from it | works |
-| **native** | anything else (AWS, a VPS…) | `.ddev/config.yaml`, hand-written | nothing to derive, and says so | refuses; use `ddev import-db` |
+| **fixed** | Upsun Fixed | `.platform.app.yaml` + `.platform/services.yaml` | `config.platformsh.yaml` | works, `platform` provider |
+| **flex** | Upsun Flex | `.upsun/config.yaml` | `config.upsun.yaml` | works, `upsun` provider |
+| **native** | anything else (AWS, a VPS…) | `.ddev/config.yaml`, hand-written | nothing, and says so | refuses; use `ddev import-db` |
 
-The add-on works this out for itself; nothing declares it. If you are ever unsure, run
-`ddev rdg-sync` — on a native repo it tells you so and changes nothing.
+Both Upsun shapes follow **Part 2**; only native needs Part 3. The add-on works the
+shape out for itself; nothing declares it. If you are ever unsure, run `ddev rdg-sync` —
+it names the shape it thinks you are in, and on a native repo it changes nothing.
+
+**A converted repo is still Flex, whatever is lying around.** `upsun convert` rewrites
+the tracked files, but nothing cleans up what was never tracked, so a repo that moved
+from Fixed to Flex typically still has a `.platform/local/project.yaml` naming the
+*pre-conversion* project — and if the conversion happened on a branch, a `.platform.app.yaml`
+comes back the moment you check out `master`. The add-on checks `.upsun/config.yaml`
+first and never reads a Fixed leftover on a Flex repo, precisely so that neither of
+those can quietly pin your PHP version to dead config or point a pull at a dead project
+id. You can delete the leftovers, and should, but nothing breaks while they are there.
 
 **Watch for vestigial Upsun config.** Several repos in the fleet carry a
 `.platform.app.yaml` left over from an abandoned Platform.sh evaluation and actually
@@ -44,7 +54,8 @@ left behind", so on one of these, say so explicitly:
 touch .ddev/rdg-native      # commit it
 ```
 
-That marker forces native mode and beats every other signal, `RDG_APP_ROOT` included.
+That marker forces native mode and beats every other signal, `.upsun/config.yaml` and
+`RDG_APP_ROOT` included.
 Without it the repo lands in derived mode, where the guard aborts every `ddev start`
 until someone runs `ddev rdg-sync` — which then derives PHP and database versions from a
 file nobody deploys from, and enforces them.
@@ -285,42 +296,61 @@ production-overwriting capability by accident.
 
 ### Upsun Fixed vs Upsun Flex
 
-The commands are named for Upsun because that is what the service is called now. The DDEV
-provider they invoke is `platform`, and that is correct rather than leftover:
+The commands are named for Upsun because that is what the service is called now, and
+they work on both shapes. Which DDEV provider they invoke depends on the repo:
 
 - **Upsun Fixed** is the rebranded Platform.sh — a `.platform/` directory, the `platform`
-  CLI, `PLATFORMSH_CLI_TOKEN`, `.platform.app.yaml` + `.platform/services.yaml`. This is
-  what the fleet is on, and what the add-on supports.
+  CLI, `PLATFORMSH_CLI_TOKEN`, `.platform.app.yaml` + `.platform/services.yaml`. Pulls go
+  through DDEV's `platform` provider.
 - **Upsun Flex** is a different shape — one `.upsun/config.yaml` with top-level
-  `applications:` / `services:` / `routes:`, the `upsun` CLI, `UPSUN_CLI_TOKEN`.
+  `applications:` / `services:` / `routes:`, the `upsun` CLI, `UPSUN_CLI_TOKEN`. Pulls go
+  through DDEV's `upsun` provider.
 
-On a Flex project the commands **refuse** rather than fall through to `ddev pull upsun`.
-That is deliberate: DDEV's stock `upsun` recipe downloads every mount to
-`/var/www/html` — public files beside the docroot instead of inside it — and still ships
-both push commands. Flex support would need a vetted `providers/upsun.yaml` here and a
-second config reader in `rdg/derive.sh`.
+Neither uses DDEV's stock recipe. The add-on ships a vetted copy of each —
+`providers/platform.yaml` and `providers/upsun.yaml` — with the same two changes: one
+mount downloaded into `$DDEV_FILES_DIR` instead of every mount into `/var/www/html`, and
+both push commands deleted. The stock versions put public files *beside* the docroot on
+any repo whose app root is a subdirectory, and still ship a production push path.
+
+**The token differs.** Fixed wants `PLATFORMSH_CLI_TOKEN`, Flex wants `UPSUN_CLI_TOKEN`,
+and a repo that has been converted needs the second one even though the first is
+probably still in `~/.ddev/global_config.yaml` from the last project you worked on. The
+recipe says which one is missing.
+
+**Which provider you get is decided by the tracked config**, not by
+`.upsun/local/project.yaml` or `.platform/local/project.yaml`. Both of those are
+gitignored, so a fresh clone has neither — and a converted repo keeps the *Fixed* one,
+naming the project it no longer deploys to.
 
 ## What the add-on actually does
 
-`.ddev/config.yaml` used to restate every runtime value that `.platform.app.yaml` already
-declared. It no longer does. `ddev rdg-sync` reads `.platform.app.yaml`,
-`.platform/services.yaml` and the theme's `package.json`, and writes three files:
+`.ddev/config.yaml` used to restate every runtime value the hosting config already
+declared. It no longer does. `ddev rdg-sync` reads the hosting config and the theme's
+`package.json`, and writes:
 
 | Generated file | What it carries |
 |---|---|
-| `.ddev/config.platformsh.yaml` | `php_version`, `nodejs_version`, `database`, `docroot`, `composer_root`, the theme daemon and its ports |
+| `.ddev/config.platformsh.yaml` (Fixed) or `.ddev/config.upsun.yaml` (Flex) | `php_version`, `nodejs_version`, `database`, `docroot`, `composer_root`, the theme daemon and its ports |
 | `.ddev/nginx/platform-locations.conf` | one `location ^~` block per `web.locations` entry outside the docroot |
+| `.ddev/.env.redis` | `REDIS_DOCKER_IMAGE`, when the app relates a Redis service and `ddev-redis` is installed |
 
-So **bumping a PHP version is a one-file edit to `.platform.app.yaml`**, and hosting
-config cannot drift from local config. All three generated files are committed
-deliberately: a colleague pulling a branch that changes `.platform.app.yaml` gets the
-matching DDEV config in the same commit.
+So **bumping a PHP version is a one-file edit to the hosting config**, and hosting
+config cannot drift from local config. The generated files are committed deliberately: a
+colleague pulling a branch that changes the hosting config gets the matching DDEV config
+in the same commit.
+
+Two names for the derived config because the two shapes derive from different files, and
+a repo can briefly hold both — DDEV merges *every* `.ddev/config.*.yaml` it finds, so two
+would fight. `ddev rdg-sync` deletes the one it does not own, and the pre-start guard
+refuses while both are present.
 
 The nginx snippet is why static pages served from outside the docroot — landing pages and
 similar `web.locations` entries — work locally at all. DDEV knows nothing about them
-otherwise, and they fall through to Drupal.
+otherwise, and they fall through to Drupal. A location with `scripts: true` is a PHP
+entry point rather than a static tree, so it is **skipped and named on stderr**: write
+that one by hand in `.ddev/nginx/*.conf` with a `fastcgi_pass`.
 
-After editing `.platform.app.yaml`:
+After editing the hosting config:
 
 ```sh
 ddev rdg-sync
@@ -393,9 +423,13 @@ deleting `docker-compose.yml` and `.env`.
 
 # Part 2: migrating an Upsun repo
 
-Once per site. Assumes the repo is an Upsun Fixed project with `.platform.app.yaml` at the
-repo root or one level below it. If it has no such file, skip to
-[Part 3](#part-3-migrating-a-repo-that-is-not-on-upsun).
+Once per site. Assumes the repo is on Upsun in either shape — `.platform.app.yaml` at the
+repo root or one level below it (**Fixed**), or `.upsun/config.yaml` (**Flex**). If it has
+neither, skip to [Part 3](#part-3-migrating-a-repo-that-is-not-on-upsun).
+
+The steps are the same for both shapes. Where they differ, it is called out inline, and
+[§ Flex, in one place](#flex-in-one-place) at the end of this part collects the
+differences for someone migrating a converted repo.
 
 ## 1. Install the add-on
 
@@ -442,7 +476,8 @@ ddev_version_constraint: ">= 1.24.8"
 **Do not set `PLATFORM_PROJECT`.** Drupal's `settings.php` typically gates
 `settings.platformsh.php` on it, so setting it locally loads the hosted settings, which
 expect a `PLATFORM_RELATIONSHIPS` blob that does not exist on your machine. Pulling
-derives the project ID from `.platform/local/project.yaml` instead, so it is not needed.
+derives the project ID from `.platform/local/project.yaml` (Fixed) or
+`.upsun/local/project.yaml` (Flex) instead, so it is not needed.
 
 **`PLATFORM_ENVIRONMENT`** is worth pinning: the provider otherwise guesses the
 environment from your current git branch, which is never a real environment name locally.
@@ -494,6 +529,38 @@ Check the theme daemon is `RUNNING`, that any static landing pages resolve, and 
 and the `Brewfile` alone so the rest of the team can migrate when they choose, and so the
 two environments can be compared directly.
 
+## Flex, in one place
+
+Everything above applies unchanged. Four things differ, and all four bite silently.
+
+**The generated file is `config.upsun.yaml`**, not `config.platformsh.yaml`. Both belong
+in the commit; there is never more than one.
+
+**A repo converted by `upsun convert` arrives with the Fixed one committed.** `ddev
+rdg-sync` deletes it and says so — commit that deletion. Until you do, the pre-start
+guard refuses to start the project, because DDEV merges *every* `.ddev/config.*.yaml` and
+two of them means a stale `php_version` plus two `web_extra_exposed_ports` entries on the
+same `container_port`, which DDEV rejects at parse time. That rejection takes every other
+`ddev` command with it, including the `ddev rdg-sync` that would fix it, so the guard
+stopping you first is the friendly outcome.
+
+**The token is `UPSUN_CLI_TOKEN`**, not `PLATFORMSH_CLI_TOKEN`. Get one from My Profile →
+API Tokens in the Upsun console:
+
+```sh
+ddev config global --web-environment-add="UPSUN_CLI_TOKEN=…"
+```
+
+**Several applications need `RDG_APP`.** A Flex config can declare more than one under
+`applications:`; with one it is used, with several `ddev rdg-sync` refuses and names
+them. `RDG_APP=drupal ddev rdg-sync`. (`RDG_APP_ROOT` is the Fixed spelling and does
+nothing here.)
+
+And one thing that is *not* a difference: the Fixed leftovers. `.platform/local/project.yaml`
+survives `upsun convert` naming the dead pre-conversion project, and `.platform.app.yaml`
+comes back with any checkout of a pre-conversion branch. The add-on reads neither on a
+Flex repo. Delete them when convenient; nothing waits on it.
+
 ## Things that will not translate
 
 `ddev rdg-sync` lists these every run rather than guessing:
@@ -504,6 +571,17 @@ two environments can be compared directly.
   `cd web && drush …`. In DDEV, `/var/www/html` is the *repo* root, so the equivalent is
   `ddev exec -d /var/www/html/<app>/web …`. `ddev drush` and `ddev composer` already
   resolve correctly and need no `-d`.
+- **PHP entry points outside the docroot.** A `web.locations` entry with `scripts: true`
+  is skipped by the nginx generator and named on stderr, because a static `try_files`
+  block would 404 it with confidence. Write that one by hand:
+
+      # .ddev/nginx/<name>.conf
+      location = /sendgrid-webhook {
+          include fastcgi_params;
+          fastcgi_param SCRIPT_NAME /sendgrid-webhook;
+          fastcgi_param SCRIPT_FILENAME /var/www/html/<app>/<dir>/webhook.php;
+          fastcgi_pass unix:/run/php-fpm.sock;
+      }
 
 ## Why not `ddev/ddev-upsun`
 

@@ -1,0 +1,10 @@
+{
+  "name": "libraries-custom",
+  "private": true,
+  "scripts": {
+    "start": "vite build --watch"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}

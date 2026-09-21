@@ -78,3 +78,47 @@ YAML
   run bash "$SCRIPT" "$p" web
   printf '%s' "$output" | grep -qF 'alias /var/www/html/static/campaign-pages;'
 }
+
+# --- Upsun Flex ---------------------------------------------------------------
+
+# Regenerate with:
+#   bash rdg/nginx-locations.sh tests/fixtures/flex-subdir/.upsun/config.yaml \
+#     drupal/web drupal 2>/dev/null > tests/expected/flex-subdir.platform-locations.conf
+@test "golden: flex generates exactly the committed expected output" {
+  bash "$SCRIPT" "$FIXTURES/flex-subdir/.upsun/config.yaml" drupal/web drupal \
+    2>/dev/null > "$BATS_TEST_TMPDIR/actual"
+  diff -u "$EXPECTED/flex-subdir.platform-locations.conf" "$BATS_TEST_TMPDIR/actual"
+}
+
+@test "flex: locations are read from the named application, not the document root" {
+  # Without the third argument the app_expr stays '.', .web.locations resolves
+  # against the document root of .upsun/config.yaml, and nothing is found -- which
+  # looks exactly like a repo that legitimately has no extra locations.
+  local with without
+  with="$(bash "$SCRIPT" "$FIXTURES/flex-subdir/.upsun/config.yaml" drupal/web drupal 2>/dev/null)"
+  without="$(bash "$SCRIPT" "$FIXTURES/flex-subdir/.upsun/config.yaml" drupal/web 2>/dev/null)"
+  printf '%s' "$with" | grep -q '^location \^~ /drupal-integrations'
+  [ -z "$without" ]
+}
+
+@test "a location that runs scripts is skipped, and said out loud" {
+  # 'scripts: true' means a PHP entry point: it needs fastcgi_pass and a
+  # SCRIPT_FILENAME, not the static try_files block this script emits. Emitting
+  # the static one would answer every request with a confident 404 -- worse than
+  # emitting nothing -- so it is skipped and named, pointing at .ddev/nginx/.
+  local out err
+  out="$(bash "$SCRIPT" "$FIXTURES/flex-subdir/.upsun/config.yaml" drupal/web drupal \
+         2>"$BATS_TEST_TMPDIR/err")"
+  ! printf '%s' "$out" | grep -q 'sendgrid-webhook'
+  grep -qF '/sendgrid-webhook' "$BATS_TEST_TMPDIR/err"
+  grep -qF '.ddev/nginx' "$BATS_TEST_TMPDIR/err"
+}
+
+@test "a location that explicitly sets scripts: false is still emitted" {
+  # Only 'true' skips. A location declaring scripts: false is static by
+  # definition, and the common case -- no scripts key at all -- must not be read
+  # as anything but static either.
+  local cfg="$BATS_TEST_TMPDIR/scripts-false.yaml"
+  printf 'applications:\n  app:\n    web:\n      locations:\n        "/":\n          root: "web"\n        "/assets":\n          root: "static/assets"\n          scripts: false\n' > "$cfg"
+  bash "$SCRIPT" "$cfg" drupal/web app 2>/dev/null | grep -q '^location \^~ /assets'
+}

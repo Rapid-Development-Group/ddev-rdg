@@ -1,0 +1,195 @@
+# Upsun Flex provider configuration — MAINTAINED BY US, not by DDEV.
+#
+# The generated-marker comment has been removed from this file on purpose so DDEV
+# leaves it alone. Two changes from DDEV's stock recipe: files_import_command
+# downloads one mount rather than all of them, and the two push commands are gone.
+# See the comments at each. To re-diff after a DDEV upgrade, delete this file, run
+# `ddev restart` to regenerate the stock version, then re-apply both changes.
+#
+# This is the UPSUN FLEX recipe -- .upsun/config.yaml, the `upsun` CLI and
+# UPSUN_CLI_TOKEN. providers/platform.yaml is its Upsun Fixed counterpart, for the
+# repos that still have .platform.app.yaml. rdg/pull-args.sh picks between them from
+# the tracked hosting config, so a repo that 'upsun convert' moved to Flex never
+# reaches the Fixed recipe even while .platform/local/project.yaml is still on disk
+# naming the dead pre-conversion project.
+#
+# Note the variables are PLATFORM_-prefixed even here: Upsun kept the prefix, and
+# DDEV's recipe reads PLATFORM_PROJECT / PLATFORM_ENVIRONMENT in both shapes. Only
+# the CLI and the token differ.
+#
+# NOTE: Historically this recipe required you to set PLATFORM_PROJECT and PLATFORM_ENVIRONMENT
+# in your project environment. In most cases those values can be derived automatically:
+# - PLATFORM_PROJECT: derived from .upsun/local/project.yaml (id field)
+# - PLATFORM_ENVIRONMENT: derived from your current git branch
+#
+# You only need to explicitly set those environment variables (e.g. in .ddev/config.yaml,
+# .ddev/config.<name>.yaml, or via `ddev config --web-environment-add=...`) when automatic
+# derivation is not appropriate for your workflow or the files are not present.
+
+
+# To use this configuration,
+
+# 1. Check out the site from Upsun and then configure it with `ddev config`. You'll want to use `ddev start` and make sure the basic functionality is working.
+# 2. Obtain and configure an API token.
+#    a. Login to the Upsun Dashboard and go to My Profile->API Tokens to create an API token for DDEV to use.
+#    b. Add the API token to the `web_environment` section in your global ddev configuration at ~/.ddev/global_config.yaml:
+#    ```yaml
+#    web_environment:
+#        - UPSUN_CLI_TOKEN=abcdeyourtoken
+#    ```
+#    You can also do this with `ddev config global --web-environment-add="UPSUN_CLI_TOKEN=abcdeyourtoken"`.
+#
+#    To use multiple API tokens for different projects, add them to your per-project configuration
+#    using the .ddev/config.local.yaml file instead. These files are gitignored by default.
+#    ```yaml
+#    web_environment:
+#        - UPSUN_CLI_TOKEN=abcdeyourtoken
+#    ```
+#
+# 3. Optionally add PLATFORM_PROJECT, PLATFORM_ENVIRONMENT,
+#    and PLATFORM_APP ( if your environment contains more than one app) variables to your
+#    project `.ddev/config.yaml` or a `.ddev/config.local.yaml`. You do not need to add these
+#    if your branch is the same as your environment and the project is specified in .upsun/local/project.yaml.
+#    ```yaml
+#    web_environment:
+#        - PLATFORM_PROJECT=abc12def34567
+#        - PLATFORM_ENVIRONMENT=main
+#        - PLATFORM_APP=app
+#    ```
+#    You can also do this with `ddev config --web-environment-add="PLATFORM_PROJECT=abc12def34567,PLATFORM_ENVIRONMENT=main,PLATFORM_APP=app"`.
+#
+# 4. `ddev restart`
+# 5. Run `ddev pull upsun`. After you agree to the prompt, the current upstream databases and files will be downloaded.
+#    To pull from a specific environment without permanently changing your project config, use `--environment`:
+#    `ddev pull upsun --environment="PLATFORM_ENVIRONMENT=main"`
+#    or with multiple variables: `ddev pull upsun --environment="PLATFORM_PROJECT=abc12def34567,PLATFORM_ENVIRONMENT=main,PLATFORM_APP=app,PLATFORM_PRIMARY_RELATIONSHIP=main,UPSUN_CLI_TOKEN=abcdeyourtoken"`
+# 6. There is deliberately no `ddev push upsun` here. See the comment further down,
+#    where the stock recipe's push commands were removed.
+
+# If you have more than one database on your Upsun project,
+# you will likely to choose which one you want to use
+# as the primary database ('db').
+# Do this by setting PLATFORM_PRIMARY_RELATIONSHIP, for example, `ddev config --web-environment-add=PLATFORM_PRIMARY_RELATIONSHIP=main`
+# or run `ddev pull upsun` with the environment variable, for example
+# `ddev pull upsun -y --environment=PLATFORM_PRIMARY_RELATIONSHIP=main`
+
+# Debugging: Use `ddev exec upsun` to see what Upsun knows about
+# your configuration and whether it's working correctly.
+
+info_command:
+  command: |
+    echo "${PLATFORM_PROJECT}.${PLATFORM_ENVIRONMENT}"
+
+auth_command:
+  command: |
+    set -eu -o pipefail
+    # set -x   # You can enable bash debugging output by uncommenting
+    # Try explicit env, then UPSUN_* fallback, then derive from .upsun/local/project.yaml and git branch.
+    export PLATFORM_PROJECT="${PLATFORM_PROJECT:-${UPSUN_PROJECT:-}}"
+    if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .upsun/local/project.yaml ]; then
+      PLATFORM_PROJECT="$(yq -r '.id' .upsun/local/project.yaml 2>/dev/null || true)"
+      export PLATFORM_PROJECT
+    fi
+
+    export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+      export PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+    fi
+
+    if [ -z "${UPSUN_CLI_TOKEN:-}" ]; then echo "Please make sure you have set UPSUN_CLI_TOKEN." && exit 1; fi
+    if [ -z "${PLATFORM_PROJECT:-}" ]; then
+      echo "Please make sure you have set PLATFORM_PROJECT." && exit 1
+    else
+      echo "Using PLATFORM_PROJECT=${PLATFORM_PROJECT:-}"
+    fi
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+      echo "Please make sure you have set PLATFORM_ENVIRONMENT." && exit 1
+    else
+      echo "Using PLATFORM_ENVIRONMENT=${PLATFORM_ENVIRONMENT:-}"
+    fi
+    if [ "$(upsun environment:info status -e ${PLATFORM_ENVIRONMENT})" != "active" ]; then
+      upsun environment:resume -e ${PLATFORM_ENVIRONMENT} -y
+    fi
+
+db_pull_command:
+  command: |
+    # set -x   # You can enable bash debugging output by uncommenting
+    set -eu -o pipefail
+    export PLATFORM_PROJECT="${PLATFORM_PROJECT:-${UPSUN_PROJECT:-}}"
+    if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .upsun/local/project.yaml ]; then
+      PLATFORM_PROJECT="$(yq -r '.id' .upsun/local/project.yaml 2>/dev/null || true)"
+      export PLATFORM_PROJECT
+    fi
+
+    export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+      PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+      export PLATFORM_ENVIRONMENT
+    fi
+
+    export UPSUN_CLI_NO_INTERACTION=1
+    # /tmp/db_relationships.yaml is the full yaml output of the database relationships
+    db_relationships_file=/tmp/db_relationships.yaml
+    PLATFORM_RELATIONSHIPS="" upsun relationships -y  -e "${PLATFORM_ENVIRONMENT}" ${PLATFORM_APP:+"--app=${PLATFORM_APP}"} | yq 'with_entries(select(.[][].type == "mariadb:*" or .[][].type == "*mysql:*" or .[][].type == "postgresql:*")) ' >${db_relationships_file}
+    db_relationships=($(yq ' keys | .[] ' ${db_relationships_file}))
+    db_names=($(yq '.[][].path' ${db_relationships_file}))
+    db_count=${#db_relationships[@]}
+    # echo "db_relationships=${db_relationships} sizeof db_relationships=${#db_relationships[@]} db_names=${db_names} db_count=${db_count} PLATFORM_PRIMARY_RELATIONSHIP=${PLATFORM_PRIMARY_RELATIONSHIP}"
+    # If we have only one database, import it into local database named 'db'
+    if [ ${#db_names[@]} -eq 1 ]; then db_names[0]="db"; fi
+
+    for (( i=0; i<${#db_relationships[@]}; i++ )); do
+      db_name=${db_names[$i]}
+      rel=${db_relationships[$i]}
+      # if PLATFORM_PRIMARY_RELATIONSHIP is set, then when doing that one, import it into local database 'db'
+      if [ "${rel}" = "${PLATFORM_PRIMARY_RELATIONSHIP:-notset}" ] ; then
+        echo "PLATFORM_PRIMARY_RELATIONSHIP=${PLATFORM_PRIMARY_RELATIONSHIP:-} so using it as database 'db' instead of the upstream '${db_name}'"
+        db_name="db"
+      fi
+
+      upsun db:dump --yes ${PLATFORM_APP:+"--app=${PLATFORM_APP}"} --relationship=${rel} --gzip --file=/var/www/html/.ddev/.downloads/${db_name}.sql.gz --project="${PLATFORM_PROJECT}" --environment="${PLATFORM_ENVIRONMENT}"
+    done
+    echo "Downloaded db dumps for databases '${db_names[@]}'"
+
+files_import_command:
+  command: |
+    # set -x   # You can enable bash debugging output by uncommenting
+    set -eu -o pipefail
+    export PLATFORM_PROJECT="${PLATFORM_PROJECT:-${UPSUN_PROJECT:-}}"
+    if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .upsun/local/project.yaml ]; then
+      PLATFORM_PROJECT="$(yq -r '.id' .upsun/local/project.yaml 2>/dev/null || true)"
+      export PLATFORM_PROJECT
+    fi
+
+    export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+        PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+        export PLATFORM_ENVIRONMENT
+    fi
+
+    export UPSUN_CLI_NO_INTERACTION=1
+    # Changed from the stock recipe, which does
+    #   mount:download --all --target=/var/www/html
+    # Mount paths in .upsun/config.yaml are relative to the *app* root (source.root,
+    # e.g. drupal/), not the repo root, so --all --target=/var/www/html drops the
+    # public files into /var/www/html/web/sites/default/files -- beside the docroot
+    # instead of inside it. It also drags down the private and drush-backups mounts
+    # nobody wants locally, and on Flex those are typically network-storage mounts
+    # that are larger still. One mount, straight into DDEV's own files dir.
+    upsun mount:download --yes --quiet --project="${PLATFORM_PROJECT}" --environment="${PLATFORM_ENVIRONMENT}" ${PLATFORM_APP:+"--app=${PLATFORM_APP}"} --mount=web/sites/default/files --target="${DDEV_FILES_DIR}"
+
+# db_push_command and files_push_command were HERE, and were removed deliberately.
+#
+# DDEV's stock recipe derives PLATFORM_ENVIRONMENT from the current git branch,
+# which is never a real Upsun environment name locally, so a stray
+# `ddev push upsun` fails safe. Our fleet pins PLATFORM_ENVIRONMENT in
+# .ddev/config.yaml so that `ddev pull` reaches the right environment -- and that
+# pin turns "fails safe" into "targets production". Someone typing `ddev push`
+# when they meant `ddev pull` would overwrite the production database and upload
+# their local files over production's. The tooling this replaced had no push path
+# at all, so shipping one is a capability we would be adding by accident.
+#
+# If you genuinely need push, add these two commands back with an explicit
+# non-production environment (`--environment=PLATFORM_ENVIRONMENT=<env>` on the
+# command line, or a hardcoded non-production value here) rather than inheriting
+# the pinned one. Do not reintroduce them as-is.

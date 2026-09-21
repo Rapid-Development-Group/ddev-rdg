@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #ddev-generated
-# Derives the Redis Docker image from Platform.sh config. Pure: reads the two
+# Derives the Redis Docker image from Upsun config, in either shape. Pure: reads the two
 # config files, prints one image tag to stdout. Prints nothing when the project
 # has no Redis service. Warnings go to stderr.
 #
@@ -11,8 +11,25 @@
 # for config.platformsh.yaml.
 set -euo pipefail
 
-app_config="${1:?usage: derive-redis.sh <app-config-path> <services-path>}"
-services="${2:?usage: derive-redis.sh <app-config-path> <services-path>}"
+app_config="${1:?usage: derive-redis.sh <app-config-path> <services-path> [app-name]}"
+services="${2:?usage: derive-redis.sh <app-config-path> <services-path> [app-name]}"
+app_name="${3:-}"
+
+# Third argument: the application name, on Upsun Flex only, where both the app
+# and the services live in one .upsun/config.yaml -- the app under
+# .applications.<name>, the services under .services. On Fixed the two are
+# separate files with everything at the document root, so both prefixes are '.'
+# and the caller passes nothing. Passing the name rather than a yq expression
+# keeps the caller (a host script shelling in through 'ddev exec') from having to
+# quote one across the container boundary.
+if [ -n "$app_name" ]; then
+  export app_name
+  app_expr='.applications[strenv(app_name)]'
+  svc_expr='.services'
+else
+  app_expr='.'
+  svc_expr='.'
+fi
 
 warn() { printf 'rdg-sync: warning: %s\n' "$*" >&2; }
 
@@ -27,9 +44,9 @@ warn() { printf 'rdg-sync: warning: %s\n' "$*" >&2; }
 # the document root, silently dropping every scalar entry -- the same trap
 # derive.sh documents for stack.runtimes.
 related_services() {
-  yq -r '.relationships // {} | to_entries[] | .value |
-           ( (select(tag == "!!map") | .service // ""),
-             (select(tag == "!!str") | split(":")[0]) )' "$app_config"
+  yq -r "$app_expr | .relationships // {} | to_entries[] | .value |
+           ( (select(tag == \"!!map\") | .service // \"\"),
+             (select(tag == \"!!str\") | split(\":\")[0]) )" "$app_config"
 }
 
 # Relationship-driven rather than scanning services.yaml for anything of type
@@ -44,7 +61,7 @@ while IFS= read -r service; do
   # strenv, not string concatenation into the expression: a service name
   # containing a double quote would close the yq string early and abort with a
   # raw parse error instead of a useful message.
-  service_type="$(service_name="$service" yq -r '.[strenv(service_name)].type // ""' "$services")"
+  service_type="$(service_name="$service" yq -r "$svc_expr | .[strenv(service_name)].type // \"\"" "$services")"
 
   case "$service_type" in
     redis:*)  candidate="redis:${service_type#redis:}" ;;

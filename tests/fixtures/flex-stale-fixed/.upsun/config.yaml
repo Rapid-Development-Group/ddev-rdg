@@ -1,0 +1,30 @@
+# A repo that 'upsun convert' turned into Flex while the untracked Fixed
+# leftovers stayed on disk. This is the real shape of stockmarketmedia, not a
+# hypothetical: 'upsun convert' rewrites the tracked files and nothing cleans up
+# .platform/local/, so the pre-conversion project id survives the conversion.
+#
+# Every value here is deliberately DIFFERENT from its counterpart in the
+# leftover Fixed files below, so a wrong read shows up as a golden diff rather
+# than passing by coincidence.
+applications:
+    drupal:
+        type: 'composable:26.05'
+        stack:
+            runtimes:
+                - 'php@8.4'
+                - 'nodejs@22'
+        relationships:
+            database: 'mysqldb:mysql'
+            redis: 'rediscache:redis'
+        web:
+            locations:
+                '/':
+                    root: 'web'
+                    passthru: '/index.php'
+        source:
+            root: /drupal/
+services:
+    mysqldb:
+        type: mariadb:11.8
+    rediscache:
+        type: redis:8.0
