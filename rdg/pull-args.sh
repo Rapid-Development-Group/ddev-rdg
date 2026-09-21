@@ -96,10 +96,16 @@ rdg_pull_parse_env() {
   case "$1" in
     -*)
       # Deliberately no flags: the whole point of these two commands is that the
-      # environment is positional. Anything else belongs on 'ddev pull platform'.
+      # environment is positional. Anything else belongs on 'ddev pull <provider>'.
+      #
+      # RDG_PULL_PROVIDER, not a hardcoded 'platform': rdg_pull_provider always runs
+      # first, and naming the wrong recipe on a Flex repo sends the reader to a
+      # provider their project does not use. The fallback is for a caller that
+      # somehow parses arguments without resolving the provider.
       printf '%s: unknown flag %s -- this command takes only an environment name.\n' \
         "$self" "$1" >&2
-      printf 'For DDEV pull flags (--skip-import and friends) use: ddev pull platform --help\n' >&2
+      printf 'For DDEV pull flags (--skip-import and friends) use: ddev pull %s --help\n' \
+        "${RDG_PULL_PROVIDER:-platform}" >&2
       return 64
       ;;
     *[,=]*)

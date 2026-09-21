@@ -303,6 +303,32 @@ assert_rejected() {
   done
 }
 
+@test "the unknown-flag message names the provider this repo actually uses" {
+  # It used to say 'ddev pull platform --help' unconditionally, which on a Flex repo
+  # points at a recipe the project does not use. Small, but it is the same
+  # Fixed-is-the-only-shape assumption the rest of this change exists to remove.
+  local spec cmd
+  rm -f "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.upsun"
+  printf 'applications:\n  drupal:\n    type: "composable:26.05"\n' > "$PROJ/.upsun/config.yaml"
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" --nope
+    [ "$status" -ne 0 ]
+    printf '%s' "$output" | grep -qF 'ddev pull upsun --help'
+  done
+}
+
+@test "on a Fixed repo that message still names the platform provider" {
+  local spec cmd
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" --nope
+    [ "$status" -ne 0 ]
+    printf '%s' "$output" | grep -qF 'ddev pull platform --help'
+  done
+}
+
 @test "no push command exists in either provider recipe" {
   # Both recipes have db_push_command and files_push_command deleted on purpose:
   # a repo that pins PLATFORM_ENVIRONMENT for pulling turns DDEV's "a stray push

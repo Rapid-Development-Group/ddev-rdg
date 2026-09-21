@@ -447,6 +447,20 @@ aborts while the generated config is missing — and `ddev rdg-sync` needs the p
 because it shells into the web container. The guard would otherwise block the only command
 that can satisfy it. After the first sync, `ddev start` works normally.
 
+**That first start has no `docroot` yet**, because the docroot is one of the things being
+derived. DDEV therefore treats the repo root as the docroot and scaffolds a
+`sites/default/settings.php` there — in the wrong place, and untracked. Delete it after
+the first sync:
+
+```sh
+ddev rdg-sync
+rm -rf sites          # only if the repo has no top-level sites/ of its own
+ddev restart
+```
+
+The alternative is to write `docroot:` into `.ddev/config.yaml` for the first start and
+delete it afterwards, which is more steps for the same result.
+
 `git add .ddev` rather than a file list: the generated files *and* the add-on's own
 installed files all belong in the commit. A clone that has `config.platformsh.yaml` but
 not `rdg/theme-watch.sh` will crash-loop the theme daemon.
