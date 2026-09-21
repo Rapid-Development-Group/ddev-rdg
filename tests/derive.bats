@@ -42,6 +42,28 @@ golden() {
   golden vite-theme
 }
 
+@test "golden: a nested docroot generates exactly the committed expected output" {
+  golden nested-docroot
+}
+
+@test "an app at the repo root emits no composer_root, whatever its docroot depth" {
+  # composer_root's absence is what tells rdg-sync (and nginx-locations.sh) that the
+  # app root IS the repo root. Emitting 'drupal' here -- the first segment of the
+  # docroot -- would make `ddev composer` run in the wrong directory.
+  local f="$FIXTURES/nested-docroot"
+  [ "$(value_of "$f" '.docroot')" = "drupal/web" ]
+  [ "$(derive "$f" | grep -c '^composer_root:')" -eq 0 ]
+}
+
+@test "a two-segment docroot still finds the theme package.json" {
+  # package.json is looked up at <docroot>/package.json, so this is only correct
+  # while docroot is built from the app root plus the declared web root rather than
+  # assumed to be one segment.
+  local f="$FIXTURES/nested-docroot"
+  derive "$f" | grep -qF 'directory: /var/www/html/drupal/web'
+  derive "$f" | sed -n 's/^# source-files: //p' | grep -qF 'drupal/web/package.json'
+}
+
 @test "golden: upsun flex generates exactly the committed expected output" {
   golden flex-subdir upsun
 }

@@ -10,10 +10,17 @@
 # to quote one across the container boundary.
 set -euo pipefail
 
-app_config="${1:?usage: nginx-locations.sh <app-config-path> <docroot> [app-name]}"
-docroot="${2:?usage: nginx-locations.sh <app-config-path> <docroot> [app-name]}"
+usage='usage: nginx-locations.sh <app-config-path> <docroot> <app-root> [app-name]'
+app_config="${1:?$usage}"
+docroot="${2:?$usage}"
 docroot="${docroot%/}"
-app_name="${3:-}"
+# Required, and the empty string is a legitimate value meaning "the app is at the
+# repo root" -- hence ${3?} (set-or-fail) rather than ${3:?} (non-empty-or-fail).
+# Required rather than inferred, because it used to be inferred and the inference
+# was wrong: see the comment above container_app_root.
+app_root="${3?$usage}"
+app_root="${app_root%/}"
+app_name="${4:-}"
 
 if [ -n "$app_name" ]; then
   export app_name
@@ -24,19 +31,47 @@ fi
 
 note() { printf 'rdg-sync: %s\n' "$*" >&2; }
 
-app_dir_rel="$(dirname "$docroot")"     # repo-relative app root, or '.' at root
-web_root_name="$(basename "$docroot")"  # the app-relative docroot, e.g. 'web'
-
+# Both of these used to be derived from the docroot alone -- app root as
+# dirname($docroot), app-relative web root as basename($docroot) -- which silently
+# assumes the docroot is exactly ONE segment below the app root. It usually is
+# ('drupal' + 'web'), and it is not always: an app at the repo root declaring
+# `root: 'drupal/web'` breaks both halves at once.
+#
+#   container_app_root  became /var/www/html/drupal, so every emitted path gained a
+#                       duplicate segment: /var/www/html/drupal/drupal/web/...
+#   web_root_name       became 'web', so the "already inside the docroot" test below
+#                       stopped matching roots like 'drupal/web/sites/default/files'
+#                       and emitted blocks nginx already serves.
+#
+# The caller knows both values exactly, so it passes the app root and this derives
+# the web root by subtraction. No depth assumption survives.
 container_app_root="/var/www/html"
-[ "$app_dir_rel" != "." ] && container_app_root="/var/www/html/$app_dir_rel"
+[ -n "$app_root" ] && container_app_root="/var/www/html/$app_root"
+
+# The docroot relative to the app root: 'web', or 'drupal/web', or whatever depth
+# the app actually declares. Stripping the prefix rather than taking a basename is
+# what keeps a multi-segment web root intact.
+web_root_rel="$docroot"
+if [ -n "$app_root" ]; then
+  case "$docroot" in
+    "$app_root"/*) web_root_rel="${docroot#"$app_root"/}" ;;
+    "$app_root")   web_root_rel="" ;;
+    *)
+      printf 'rdg-sync: warning: docroot %s is not under app root %s; skipping the nginx snippet\n' \
+        "$docroot" "$app_root" >&2
+      exit 0
+      ;;
+  esac
+fi
 
 blocks=""
 while IFS=$'\t' read -r location location_root location_scripts; do
   [ -n "$location" ] || continue
   [ "$location" = "/" ] && continue
-  # nginx already serves anything under the docroot.
+  # nginx already serves anything under the docroot. Compared against the
+  # APP-RELATIVE docroot, because web.locations roots are app-relative too.
   case "$location_root" in
-    "$web_root_name"|"$web_root_name"/*) continue ;;
+    "$web_root_rel"|"$web_root_rel"/*) continue ;;
   esac
 
   # A location with 'scripts: true' is a PHP entry point, not a static tree --

@@ -198,10 +198,16 @@ app_name="$(printf '%s' "$config" | sed -n 's/^# source-app: //p' | awk 'NR == 1
 # SIGPIPE becomes the pipeline's status and 'set -e' aborts the sync. awk reads to
 # EOF. Same defect class as runtime_version in rdg/derive.sh, which CI caught.
 docroot="$(printf '%s' "$config" | sed -n 's/^docroot: *//p' | awk 'NR == 1')"
+# The app root, repo-relative; empty when the app IS the repo root, because
+# derive.sh omits composer_root in that case. nginx-locations.sh needs it as its
+# own value rather than inferring it from the docroot: an app at the repo root
+# declaring `root: 'drupal/web'` makes dirname($docroot) the wrong answer, and the
+# resulting paths carry a duplicated segment (styledots is that repo).
+app_root="$(printf '%s' "$config" | sed -n 's/^composer_root: *//p' | awk 'NR == 1')"
 
 locations=""
 if [ -n "$docroot" ]; then
-  locations="$(run_in_container bash /mnt/ddev_config/rdg/nginx-locations.sh "/var/www/html/$app_config_rel" "$docroot" "$app_name")"
+  locations="$(run_in_container bash /mnt/ddev_config/rdg/nginx-locations.sh "/var/www/html/$app_config_rel" "$docroot" "$app_root" "$app_name")"
 fi
 
 # Only when the ddev-redis add-on is actually installed. Without it there is no
@@ -302,6 +308,11 @@ elif [ -f "$redis_env" ] && grep -q '#ddev-generated' "$redis_env"; then
   # Only ever remove our own file; a hand-written override is the developer's.
   rm -f "$redis_env"
 fi
+
+# Regenerated every sync so a project rename self-heals. The router and the
+# hostname both embed the project name, and a stale pair hands the Mailpit hostname
+# to the application instead -- which answers 200, so nothing looks wrong.
+bash "$rdg_dir/mailpit-hostname.sh" "$ddev_dir"
 
 # The theme build toolchain is NOT generated here. It ships with the add-on as
 # web-build/Dockerfile.rdg-theme-toolchain, unconditionally, because it is identical

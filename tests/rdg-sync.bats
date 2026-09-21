@@ -305,6 +305,23 @@ YAML
   printf '%s' "$output" | grep -qF 'imagick'
 }
 
+@test "an app at the repo root: the nginx snippet gets the app root, not a guess" {
+  # End-to-end wiring for the styledots shape. rdg-sync reads the app root back out
+  # of the generated config's composer_root line (absent = repo root) and hands it
+  # to nginx-locations.sh. Drop either half and the emitted paths gain a duplicated
+  # segment, which 404s every asset under them.
+  rm -rf "$PROJ"
+  mkdir -p "$PROJ/.ddev/rdg"
+  cp -R "$REPO_ROOT/tests/fixtures/nested-docroot/." "$PROJ/"
+  cp "$REPO_ROOT"/rdg/*.sh "$PROJ/.ddev/rdg/"
+  printf 'name: proj\ntype: drupal11\n' > "$PROJ/.ddev/config.yaml"
+  sync_run
+  [ "$status" -eq 0 ]
+  diff -u "$REPO_ROOT/tests/expected/nested-docroot.platform-locations.conf" \
+          "$PROJ/.ddev/nginx/platform-locations.conf"
+  ! grep -q 'drupal/drupal' "$PROJ/.ddev/nginx/platform-locations.conf"
+}
+
 # --- Upsun Flex ---------------------------------------------------------------
 
 # Re-points the synthetic project at the Flex fixture. The stub ddev, the path

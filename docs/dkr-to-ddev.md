@@ -175,7 +175,7 @@ ddev drush …             ddev composer …
 ddev ssh                 # shell in the web container
 ddev logs -s web -f      # includes theme compile output
 ddev sequelace           # open the database in Sequel Ace (or: ddev tableplus)
-ddev mailpit             # captured outgoing mail
+ddev mailpit             # captured mail (or https://mailpit.<project>.ddev.site)
 ddev upsun-db-pull       # refresh the database (optionally: <environment>)
 ddev upsun-files-pull    # refresh the public files
 ddev poweroff            # stop every DDEV project and its router
@@ -293,6 +293,21 @@ is never a real environment name locally, so a stray `ddev push` fails safe — 
 that pins `PLATFORM_ENVIRONMENT` for pulling turns "fails safe" into "targets
 production". `dkr` had no push verb, so keeping them would have added a
 production-overwriting capability by accident.
+
+### Mailpit has its own hostname
+
+`https://mailpit.<project>.ddev.site`, set up by the add-on on install — nothing to
+configure, in either mode.
+
+Worth knowing why that is not just `ddev mailpit`. DDEV serves Mailpit on
+`mailpit_http_port` / `mailpit_https_port` against the *bare* project hostname, and
+there is one `ddev-router` for every project on the machine. So the default 8025/8026
+belongs to whichever project started first, and with several projects up — the point of
+moving off `dkr` — `ddev mailpit` can open another project's inbox without saying so.
+A hostname cannot collide.
+
+`ddev mailpit` and the port-based URL still work, and SMTP is unchanged: the app sends
+to `localhost:1025` inside the web container as before.
 
 ### Upsun Fixed vs Upsun Flex
 
@@ -657,7 +672,7 @@ here needs a custom `docker-compose.*.yaml`:
 | `nginx` + `php` (wodby) | the built-in web container — `php_version`, `webserver_type` |
 | `traefik`, `PROJECT_BASE_URL=docker.localhost:8000` | the built-in router — `https://<project>.ddev.site` |
 | `mariadb` | the built-in `db` container — `database:` |
-| `mailhog` / `mailpit` | built in — `ddev mailpit` |
+| `mailhog` / `mailpit` | built in — `https://mailpit.<project>.ddev.site`, or `ddev mailpit` |
 | `redis` | `ddev add-on get ddev/ddev-redis` |
 | `solr` | `ddev add-on get ddev/ddev-drupal-solr` |
 | `minio` / `rustfs` | `ddev add-on get Rapid-Development-Group/ddev-rustfs` — see [S3 emulation](#s3-emulation) |

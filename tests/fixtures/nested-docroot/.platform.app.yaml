@@ -1,0 +1,29 @@
+# The app is at the REPO ROOT, but its docroot is two segments down. Modelled on
+# styledots, which is a real repo in the fleet: app config at the repo root and
+# `root: 'drupal/web'`.
+#
+# This is the shape that breaks any code inferring the app root from the docroot:
+# dirname('drupal/web') is 'drupal', which is not the app root, and
+# basename('drupal/web') is 'web', which is not the app-relative docroot either.
+name: app
+type: 'php:8.3'
+dependencies:
+    nodejs:
+        nodejs: "20"
+relationships:
+    database: 'maindb:mysql'
+web:
+    locations:
+        '/':
+            root: 'drupal/web'
+            passthru: '/index.php'
+        # INSIDE the docroot. nginx serves it already; emitting a block for it is
+        # the bug this fixture exists to catch.
+        '/sites/default/files':
+            root: 'drupal/web/sites/default/files'
+            allow: true
+        # OUTSIDE the docroot, and outside the docroot's parent too.
+        '/promo':
+            root: 'landing-pages/promo'
+            index:
+                - 'index.html'

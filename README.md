@@ -191,6 +191,33 @@ merging `.ddev/config*.yaml`, so a hand-written block would survive alongside th
 derived one and DDEV would reject the project for a duplicate `container_port`.
 Delete those blocks first.
 
+## Mailpit on a hostname
+
+Installing the add-on puts Mailpit's UI at `https://mailpit.<project>.ddev.site`, in
+both modes, without the repo doing anything.
+
+DDEV serves it on `mailpit_http_port` / `mailpit_https_port` against the *bare* project
+hostname — and there is one `ddev-router` for every project on the machine, so the
+default 8025/8026 belongs to whichever project started first. With several projects up,
+which is the point of moving off `dkr`, you read another project's mail and nothing says
+so. A hostname is per-project by construction.
+
+Two generated files, neither carrying `#ddev-generated` (DDEV regenerates
+`traefik/config/` and would take the router with it):
+
+| | |
+|---|---|
+| `.ddev/traefik/config/mailpit.yaml` | one router on the https entrypoint pointing at the web container's port 8025, with `priority: 100` so it outranks the router DDEV generates for the same hostname — that one points at port 80, i.e. at the application |
+| `.ddev/config.mailpit.yaml` | `additional_hostnames`, which is what gets the name into the **mkcert certificate**. The cert's `*.ddev.site` wildcard matches a single label, so it does not cover a subdomain of the project host; without this the name resolves and then fails TLS |
+
+**SMTP is untouched** — the app still sends to `localhost:1025` inside the web container,
+and the port-based URL keeps working.
+
+Both embed the project name, so `ddev rdg-sync` rewrites them every run and a rename
+self-heals. On a native repo, re-run `ddev add-on get` after a rename. A project name
+that is not a DNS label, or a `config.yaml` with no `name:`, is declined out loud and
+Mailpit keeps its port-based URL.
+
 ## What it derives
 
 `php_version`, `nodejs_version`, `database`, `docroot`, `composer_root`, the theme
