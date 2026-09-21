@@ -152,11 +152,13 @@ ddev drush uli       # one-time login link for user 1
 ```
 
 The URL is `https://<project>.ddev.site`, where `<project>` is the `name` in
-`.ddev/config.yaml` — not `docker.localhost:8000`. `ddev describe` prints it if you are
-unsure. DDEV routes by hostname, so **several projects can run at once** and nothing has
-to be stopped first. `*.ddev.site` resolves to 127.0.0.1 in public DNS, so with
-`use_dns_when_possible: true` there is normally no `/etc/hosts` edit and no password
-prompt; offline, DDEV falls back to `/etc/hosts` and will ask.
+`.ddev/config.yaml`, or the directory's own name when that file declares none — not
+`docker.localhost:8000`. `ddev describe` prints it if you are unsure. DDEV routes by
+hostname, so **several projects can run at once** and nothing has to be stopped first;
+see [Two checkouts of the same site](#two-checkouts-of-the-same-site) for running two
+branches of *one* repo that way. `*.ddev.site` resolves to 127.0.0.1 in public DNS, so
+with `use_dns_when_possible: true` there is normally no `/etc/hosts` edit and no
+password prompt; offline, DDEV falls back to `/etc/hosts` and will ask.
 
 ## Did it work?
 
@@ -188,6 +190,59 @@ is no hosted environment to pull from.
 There is **no separate theme build step**. `ddev start` runs the asset watcher as a
 daemon, which installs dependencies and does a full compile before it begins watching —
 which is why the first `ddev start` after a clone takes longer than later ones.
+
+## Two checkouts of the same site
+
+`dkr` bound fixed host ports, so one site meant one copy running. DDEV routes by
+hostname instead, so you can have a worktree per branch — one per task, one per review —
+all up at the same time.
+
+The one thing in the way is the project name, because it also builds the container
+names, the hostname and the database volume. Two directories claiming the same name
+would share one database, so DDEV refuses the second outright:
+
+> Project 'rdg2020' was found in configured directory … and it is already used by
+> project 'rdg2020'.
+
+**The fix is to delete `name:` from `.ddev/config.yaml` and commit that.** DDEV then
+names each checkout after its directory, and there is nothing else to configure:
+
+```sh
+git worktree add ../rdg2020-vite vite
+cd ../rdg2020-vite
+cp -r ../rdg2020/.platform/local .platform/     # see below
+ddev start                                       # https://rdg2020-vite.ddev.site
+```
+
+Both are now live — `https://rdg2020.ddev.site` and `https://rdg2020-vite.ddev.site` —
+with their own containers, their own database and their own
+`https://mailpit.<project>.ddev.site`. The theme watcher runs in both; they do not
+contend for its port, because that goes through the same shared router as everything
+else.
+
+Keep directory names to lowercase letters, digits and hyphens; a branch that is not one
+needs a slugged directory — `git worktree add ../rdg2020-op-500 OP-500-rdg-theme`. DDEV
+does not enforce this, but the name becomes a hostname: a dot in it makes
+`<name>.ddev.site` three labels, which the `*.ddev.site` certificate does not cover.
+
+Two things do not come across, both because git does not track them:
+
+- **The database.** A new project name means a new, empty volume. Pull again, or hop:
+
+      ddev -d ~/Sites/rdg2020 export-db --file=/tmp/db.sql.gz
+      ddev -d ~/Sites/rdg2020-vite import-db --file=/tmp/db.sql.gz
+
+- **The Upsun link file**, `.platform/local/project.yaml` (or `.upsun/local/project.yaml`
+  on Flex) — the `cp` above. Without it `ddev upsun-db-pull` has no project id and fails
+  with a message that says nothing about worktrees.
+
+When you are done, take the project out of DDEV's list before removing the directory,
+or it lingers in `ddev list` as a broken entry:
+
+```sh
+ddev stop --unlist rdg2020-vite
+git worktree remove ../rdg2020-vite
+```
 
 ## `dkr` → DDEV
 
@@ -489,7 +544,9 @@ Do not restate anything the add-on derives — no `php_version`, `nodejs_version
 about the hosting config:
 
 ```yaml
-name: <project>
+# No 'name:'. DDEV then names the project after the directory it is in, which is
+# what lets a worktree per branch run at the same time -- see "Two checkouts of the
+# same site". Set one only if the directory cannot be named after the project.
 type: drupal11
 
 # For pulling. PLATFORM_PROJECT is deliberately absent -- see below.
@@ -688,7 +745,9 @@ gives `docroot: drupal/web` and `composer_root: drupal`.
 ## 3. Write `.ddev/config.yaml`
 
 ```yaml
-name: <project>
+# No 'name:'. DDEV then names the project after the directory it is in, which is
+# what lets a worktree per branch run at the same time -- see "Two checkouts of the
+# same site". Set one only if the directory cannot be named after the project.
 type: drupal10
 docroot: drupal/web           # from the mount + NGINX_SERVER_ROOT
 composer_root: drupal         # where composer.json actually lives
@@ -1023,7 +1082,9 @@ Worth being clear, because it is not "containers" — those already exist. It is
 ## The config skeleton
 
 ```yaml
-name: <project>
+# No 'name:'. DDEV then names the project after the directory it is in, which is
+# what lets a worktree per branch run at the same time -- see "Two checkouts of the
+# same site". Set one only if the directory cannot be named after the project.
 type: generic
 docroot: ""            # no PHP to serve
 performance_mode: none # see below
