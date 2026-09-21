@@ -1,0 +1,5 @@
+# LEFTOVER. mariadb 10.6 against Flex's 11.8, redis 6.2 against 8.0.
+olddb:
+    type: mariadb:10.6
+oldredis:
+    type: redis:6.2

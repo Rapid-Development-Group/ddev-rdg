@@ -8,7 +8,8 @@ setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   INSTALL="$REPO_ROOT/install.yaml"
   STATIC_CONFIG="$REPO_ROOT/config.rdg.yaml"
-  PROVIDER="$REPO_ROOT/providers/platform.yaml"
+  PROVIDERS="$REPO_ROOT/providers/platform.yaml
+$REPO_ROOT/providers/upsun.yaml"
 }
 
 # Expands project_files into the concrete file list DDEV would copy into .ddev/.
@@ -22,11 +23,11 @@ shipped_files() {
   done < <(yq -r '.project_files[]' "$INSTALL")
 }
 
-@test "every shipped file carries DDEV's generated marker, except the pull provider" {
+@test "every shipped file carries DDEV's generated marker, except the pull providers" {
   # The Critical finding this guards: without the marker DDEV silently overwrites
   # a shipped file on the next start (it searches the whole file for the string,
-  # not just line 1). The provider is the deliberate exception -- it is ours, and
-  # the marker is what would make DDEV revert our recipe.
+  # not just line 1). The two provider recipes are the deliberate exception -- they
+  # are ours, and the marker is what would make DDEV revert them.
   local f count=0 failed=""
   while IFS= read -r f; do
     count=$((count + 1))
@@ -35,7 +36,7 @@ shipped_files() {
   listed in project_files but does not exist: $f"
       continue
     fi
-    if [ "$f" = "$PROVIDER" ]; then
+    if printf '%s\n' "$PROVIDERS" | grep -qxF "$f"; then
       if grep -qF '#ddev-generated' "$f"; then
         failed="$failed
   must NOT carry the marker (DDEV would overwrite our recipe): $f"
@@ -65,6 +66,10 @@ shipped_files() {
   printf '%s\n' "$entries" | grep -qx 'rdg/'
   printf '%s\n' "$entries" | grep -qx 'config.rdg.yaml'
   printf '%s\n' "$entries" | grep -qx 'providers/platform.yaml'
+  # The Upsun Flex counterpart. Its absence would leave 'ddev upsun-db-pull' on a
+  # Flex repo resolving to DDEV's stock recipe, which downloads every mount to the
+  # wrong place and still carries both push commands.
+  printf '%s\n' "$entries" | grep -qx 'providers/upsun.yaml'
 }
 
 @test "the shipped file list covers every script rdg-sync and the guard invoke" {
@@ -129,6 +134,10 @@ shipped_files() {
   local actions
   actions="$(yq -r '.removal_actions[]' "$INSTALL")"
   printf '%s\n' "$actions" | grep -qF 'config.platformsh.yaml'
+  # Both generated names. A repo is one shape or the other, but neither file
+  # carries the marker, so removal has to name both or a converted repo keeps the
+  # one it is no longer generating.
+  printf '%s\n' "$actions" | grep -qF 'config.upsun.yaml'
   printf '%s\n' "$actions" | grep -qF 'nginx/platform-locations.conf'
 }
 
@@ -168,4 +177,82 @@ shipped_files() {
     if grep -v '^[[:space:]]*#' "$f" | grep -qi webpack; then failed="$failed $f"; fi
   done < <(shipped_files)
   [ -z "$failed" ] || { echo "bundler-specific active lines in:$failed"; return 1; }
+}
+
+# --- the Mailpit hostname ------------------------------------------------------
+
+@test "installing puts Mailpit's UI on a hostname, in every mode" {
+  # Not left to each repo to remember. DDEV serves Mailpit on a PORT against the
+  # bare project hostname, one ddev-router serves every project, and the default
+  # 8025/8026 therefore belongs to whichever project started first -- so without
+  # this you silently read another project's mail.
+  local actions
+  actions="$(yq -r '.post_install_actions[]' "$INSTALL")"
+  printf '%s\n' "$actions" | grep -qF 'rdg/mailpit-hostname.sh'
+}
+
+@test "removal deletes both Mailpit files, which carry no ddev marker" {
+  local actions
+  actions="$(yq -r '.removal_actions[]' "$INSTALL")"
+  printf '%s\n' "$actions" | grep -qF 'traefik/config/mailpit.yaml'
+  printf '%s\n' "$actions" | grep -qF 'config.mailpit.yaml'
+}
+
+@test "the Mailpit generator ships, and is reachable from post_install_actions" {
+  printf '%s\n' "$(shipped_files)" | grep -qF '/rdg/mailpit-hostname.sh'
+}
+
+@test "the generated Mailpit files must NOT carry the ddev-generated marker" {
+  # DDEV regenerates traefik/config/ and owns config.*.yaml carrying the marker, so
+  # a marker here means the router vanishes on the next restart -- intermittently,
+  # which is the worst way for it to fail.
+  local proj="$BATS_TEST_TMPDIR/p"
+  mkdir -p "$proj/.ddev"
+  printf 'name: demo\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
+  bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  ! grep -qF '#ddev-generated' "$proj/.ddev/traefik/config/mailpit.yaml"
+  ! grep -qF '#ddev-generated' "$proj/.ddev/config.mailpit.yaml"
+}
+
+@test "the router points at the web container's Mailpit and outranks DDEV's own" {
+  local proj="$BATS_TEST_TMPDIR/p"
+  mkdir -p "$proj/.ddev"
+  printf 'name: demo\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
+  bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  local r="$proj/.ddev/traefik/config/mailpit.yaml"
+  [ "$(yq -r '.http.services."demo-mailpit-ui".loadbalancer.servers[0].url' "$r")" = "http://ddev-demo-web:8025" ]
+  [ "$(yq -r '.http.routers."demo-mailpit-ui".priority' "$r")" -gt 0 ]
+  [ "$(yq -r '.http.routers."demo-mailpit-ui".tls' "$r")" = "true" ]
+  # additional_hostnames, not additional_fqdns: DDEV appends '.ddev.site' itself,
+  # and a bare 'mailpit' here would publish https://mailpit.ddev.site and claim that
+  # name in the namespace every other project shares.
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.demo" ]
+}
+
+@test "a project name that is not a DNS label is declined, not mangled" {
+  local proj="$BATS_TEST_TMPDIR/bad"
+  mkdir -p "$proj/.ddev"
+  printf 'name: "my project"\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
+  run bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF 'not a DNS label'
+  [ ! -f "$proj/.ddev/traefik/config/mailpit.yaml" ]
+  [ ! -f "$proj/.ddev/config.mailpit.yaml" ]
+}
+
+@test "a config.yaml with no name is declined rather than guessed at" {
+  local proj="$BATS_TEST_TMPDIR/noname"
+  mkdir -p "$proj/.ddev"
+  printf 'type: drupal11\n' > "$proj/.ddev/config.yaml"
+  run bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  [ "$status" -eq 0 ]
+  [ ! -f "$proj/.ddev/config.mailpit.yaml" ]
+}
+
+@test "a quoted project name is unquoted before it reaches the hostname" {
+  local proj="$BATS_TEST_TMPDIR/q"
+  mkdir -p "$proj/.ddev"
+  printf 'name: "demo"\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
+  bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
+  [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.demo" ]
 }

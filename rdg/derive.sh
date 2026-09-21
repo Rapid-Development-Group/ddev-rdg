@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 #ddev-generated
-# Derives DDEV config from Platform.sh config. Pure: reads a project root,
-# writes YAML to stdout. Warnings and notes go to stderr.
+# Derives DDEV config from Upsun config, in either of its two shapes. Pure: reads
+# a project root, writes YAML to stdout. Warnings and notes go to stderr.
+#
+# The two shapes hold the SAME keys in different places:
+#
+#   Fixed  <app>/.platform.app.yaml   -- app keys at the document root
+#          .platform/services.yaml    -- services at the document root
+#   Flex   .upsun/config.yaml         -- app keys under .applications.<name>,
+#                                        services under .services
+#
+# So this is one parser with two yq prefixes, not two parsers. Every expression
+# below is written as "<prefix> | <the rest>"; the pipe is what makes an empty-ish
+# prefix ('.') legal in the same string as a real one.
 set -euo pipefail
 
 # shellcheck source=rdg/source-hash.sh
 source "$(dirname "${BASH_SOURCE[0]}")/source-hash.sh"
+# shellcheck source=rdg/mode.sh
+source "$(dirname "${BASH_SOURCE[0]}")/mode.sh"
 
 root="${1:?usage: derive.sh <project-root>}"
 root="${root%/}"
@@ -14,33 +27,85 @@ die()  { printf 'rdg-sync: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'rdg-sync: warning: %s\n' "$*" >&2; }
 note() { printf 'rdg-sync: %s\n' "$*" >&2; }
 
-# --- locate the app config --------------------------------------------------
-# Platform.sh resolves an app's root from wherever its config file lives, so it
-# is not necessarily at the repo root.
-if [ -n "${RDG_APP_ROOT:-}" ]; then
-  app_config="$root/${RDG_APP_ROOT%/}/.platform.app.yaml"
-  [ -f "$app_config" ] || die "RDG_APP_ROOT=$RDG_APP_ROOT but $app_config does not exist"
-elif [ -f "$root/.platform.app.yaml" ]; then
-  app_config="$root/.platform.app.yaml"
-else
-  candidates=()
+mode="$(rdg_mode "$root")"
+
+# --- locate the config, and work out the two prefixes -----------------------
+app_name=""
+
+if [ "$mode" = flex ]; then
+  app_config_rel=".upsun/config.yaml"
+  app_config="$root/$app_config_rel"
+  services_rel="$app_config_rel"
+  services="$app_config"
+
+  # Which application? Most repos declare one. RDG_APP picks among several, and
+  # mirrors RDG_APP_ROOT on the Fixed side.
+  app_names=()
   while IFS= read -r found; do
-    candidates+=("$found")
-  done < <(find "$root" -mindepth 2 -maxdepth 2 -name .platform.app.yaml | sort)
-  case ${#candidates[@]} in
-    0) die "no .platform.app.yaml at $root or one level below it" ;;
-    1) app_config="${candidates[0]}" ;;
-    *) die "multiple app configs found, set RDG_APP_ROOT to choose one: ${candidates[*]}" ;;
-  esac
+    [ -n "$found" ] && app_names+=("$found")
+  done < <(yq -r '.applications // {} | keys | .[]' "$app_config")
+
+  if [ -n "${RDG_APP:-}" ]; then
+    app_name="$RDG_APP"
+    # strenv, not string concatenation into the expression: an app name
+    # containing a double quote would close the yq string early and abort with a
+    # raw parse error instead of the message written here.
+    if [ "$(app_name="$app_name" yq -r '.applications // {} | has(strenv(app_name))' "$app_config")" != "true" ]; then
+      die "RDG_APP=$RDG_APP but $app_config_rel declares no such application: ${app_names[*]:-none}"
+    fi
+  else
+    case ${#app_names[@]} in
+      0) die "no applications declared in $app_config_rel" ;;
+      1) app_name="${app_names[0]}" ;;
+      *) die "multiple applications found, set RDG_APP to choose one: ${app_names[*]}" ;;
+    esac
+  fi
+
+  app_expr='.applications[strenv(app_name)]'
+  svc_expr='.services'
+
+  # Flex resolves the app root from 'source.root' rather than from where the
+  # config file sits. Leading and trailing slashes are both optional in practice
+  # ('/drupal/', 'drupal', '/'), so normalise both away; '' means the repo root.
+  app_root="$(app_name="$app_name" yq -r "$app_expr | .source.root // \"\"" "$app_config")"
+  app_root="${app_root#/}"
+  app_root="${app_root%/}"
+else
+  # --- Upsun Fixed ----------------------------------------------------------
+  # Platform.sh resolves an app's root from wherever its config file lives, so it
+  # is not necessarily at the repo root.
+  if [ -n "${RDG_APP_ROOT:-}" ]; then
+    app_config="$root/${RDG_APP_ROOT%/}/.platform.app.yaml"
+    [ -f "$app_config" ] || die "RDG_APP_ROOT=$RDG_APP_ROOT but $app_config does not exist"
+  elif [ -f "$root/.platform.app.yaml" ]; then
+    app_config="$root/.platform.app.yaml"
+  else
+    candidates=()
+    while IFS= read -r found; do
+      candidates+=("$found")
+    done < <(find "$root" -mindepth 2 -maxdepth 2 -name .platform.app.yaml | sort)
+    case ${#candidates[@]} in
+      0) die "no .platform.app.yaml at $root or one level below it, and no $root/.upsun/config.yaml" ;;
+      1) app_config="${candidates[0]}" ;;
+      *) die "multiple app configs found, set RDG_APP_ROOT to choose one: ${candidates[*]}" ;;
+    esac
+  fi
+
+  app_dir="$(dirname "$app_config")"
+  app_root="${app_dir#"$root"}"
+  app_root="${app_root#/}"          # '' when the app is at the repo root
+
+  app_config_rel="${app_config#"$root"/}"
+  services_rel=".platform/services.yaml"
+  services="$root/$services_rel"
+
+  app_expr='.'
+  svc_expr='.'
 fi
 
-app_dir="$(dirname "$app_config")"
-app_root="${app_dir#"$root"}"
-app_root="${app_root#/}"          # '' when the app is at the repo root
-
-app_config_rel="${app_config#"$root"/}"
-services_rel=".platform/services.yaml"
-services="$root/$services_rel"
+# Exported once: every yq call below reads it through strenv. Harmless and empty
+# on Fixed, where app_expr does not mention it.
+export app_name
 
 # --- composable runtimes ----------------------------------------------------
 # Entries are either a scalar ("nodejs@20") or a single-key map
@@ -48,7 +113,7 @@ services="$root/$services_rel"
 # the comma binds looser than the pipe and the second select runs against the
 # document root, silently dropping every scalar entry.
 runtimes() {
-  yq -r '.stack.runtimes[]? | ( (select(tag == "!!map") | keys | .[0]), (select(tag == "!!str")) )' \
+  yq -r "$app_expr | .stack.runtimes[]? | ( (select(tag == \"!!map\") | keys | .[0]), (select(tag == \"!!str\")) )" \
     "$app_config"
 }
 
@@ -65,12 +130,12 @@ runtime_version() {
 }
 
 # --- php --------------------------------------------------------------------
-app_type="$(yq -r '.type // ""' "$app_config")"
+app_type="$(yq -r "$app_expr | .type // \"\"" "$app_config")"
 php_version=""
 case "$app_type" in
   php:*)        php_version="${app_type#php:}" ;;
   composable:*) php_version="$(runtime_version php)" ;;
-  "")           warn "no 'type' declared in $app_config_rel" ;;
+  "")           warn "no 'type' declared for the app in $app_config_rel" ;;
   *)            warn "unrecognised app type '$app_type'" ;;
 esac
 [ -n "$php_version" ] || warn "could not determine a PHP version"
@@ -78,7 +143,7 @@ esac
 # --- nodejs -----------------------------------------------------------------
 nodejs_version="$(runtime_version nodejs)"
 if [ -z "$nodejs_version" ]; then
-  nodejs_version="$(yq -r '.dependencies.nodejs.nodejs // .dependencies.nodejs.nodejs_version // ""' "$app_config")"
+  nodejs_version="$(yq -r "$app_expr | .dependencies.nodejs.nodejs // .dependencies.nodejs.nodejs_version // \"\"" "$app_config")"
 fi
 
 # --- database ---------------------------------------------------------------
@@ -89,19 +154,19 @@ fi
 # the actual service name.
 db_type=""; db_version=""
 service_name=""
-rel_tag="$(yq -r '.relationships.database | tag' "$app_config")"
+rel_tag="$(yq -r "$app_expr | .relationships.database | tag" "$app_config")"
 case "$rel_tag" in
   '!!null')
     warn "no 'database' relationship declared, skipping the database key"
     ;;
   '!!map')
-    service_name="$(yq -r '.relationships.database.service // ""' "$app_config")"
+    service_name="$(yq -r "$app_expr | .relationships.database.service // \"\"" "$app_config")"
     if [ -z "$service_name" ]; then
       warn "'database' relationship is a malformed map (no 'service' key) in $app_config_rel, skipping the database key"
     fi
     ;;
   *)
-    relationship="$(yq -r '.relationships.database // ""' "$app_config")"
+    relationship="$(yq -r "$app_expr | .relationships.database // \"\"" "$app_config")"
     service_name="${relationship%%:*}"
     ;;
 esac
@@ -114,7 +179,7 @@ if [ -n "$service_name" ]; then
     # containing a double quote would close the yq string early and abort with a
     # raw yq parse error instead of the "not defined in services.yaml" warning
     # this code is written to give.
-    service_type="$(service_name="$service_name" yq -r '.[strenv(service_name)].type // ""' "$services")"
+    service_type="$(service_name="$service_name" yq -r "$svc_expr | .[strenv(service_name)].type // \"\"" "$services")"
     case "$service_type" in
       mariadb:*)      db_type="mariadb";  db_version="${service_type#mariadb:}" ;;
       mysql:*)        db_type="mysql";    db_version="${service_type#mysql:}" ;;
@@ -154,7 +219,7 @@ if [ -n "$service_name" ]; then
 fi
 
 # --- docroot ----------------------------------------------------------------
-web_root="$(yq -r '.web.locations."/".root // ""' "$app_config")"
+web_root="$(yq -r "$app_expr | .web.locations.\"/\".root // \"\"" "$app_config")"
 docroot=""
 if [ -n "$web_root" ]; then
   docroot="${app_root:+$app_root/}${web_root#/}"
@@ -195,16 +260,22 @@ fi
 
 # --- what we deliberately do not translate ----------------------------------
 for section in crons mounts workers; do
-  if [ "$(yq -r ".$section // \"\" | length" "$app_config")" != "0" ]; then
+  if [ "$(yq -r "$app_expr | .$section // \"\" | length" "$app_config")" != "0" ]; then
     note "$section declared in $app_config_rel, not reproduced locally"
   fi
 done
-if [ "$(yq -r '.hooks // "" | length' "$app_config")" != "0" ]; then
+if [ "$(yq -r "$app_expr | .hooks // \"\" | length" "$app_config")" != "0" ]; then
   note "build/deploy hooks declared in $app_config_rel, not reproduced locally"
 fi
 
 # --- emit -------------------------------------------------------------------
-hash_paths=("$app_config_rel" "$services_rel")
+# On Flex the app and the services live in ONE file, so it is hashed once. A
+# leftover .platform/services.yaml from before 'upsun convert' must not appear
+# here even though it is sitting right there on disk: hashing a file the
+# derivation never reads means an edit to dead config aborts every 'ddev start'
+# until someone re-syncs, and the re-sync then changes nothing.
+hash_paths=("$app_config_rel")
+[ "$services_rel" != "$app_config_rel" ] && hash_paths+=("$services_rel")
 [ -n "$package_json_rel" ] && hash_paths+=("$package_json_rel")
 
 # The '# source-files:' header below is space-separated, and check-sync.sh
@@ -226,13 +297,26 @@ done
 
 source_hash="$(rdg_source_hash "$root" "${hash_paths[@]}")"
 
+if [ "$services_rel" = "$app_config_rel" ]; then
+  derived_from="$app_config_rel (application '$app_name')"
+else
+  derived_from="$app_config_rel and $services_rel"
+fi
+
 cat <<EOF
 # GENERATED by 'ddev rdg-sync'. Do not edit.
-# Derived from $app_config_rel and $services_rel.
+# Derived from $derived_from.
 # Change the runtime there, run 'ddev rdg-sync', and commit the result.
 # source-files: ${hash_paths[*]}
 # source-sha256: $source_hash
 EOF
+
+# Flex only, and it is machine-readable on purpose: commands/host/rdg-sync runs
+# on the host, where there is no yq, and it has to pass this same app name to
+# nginx-locations.sh and derive-redis.sh. Recording it here is how the host
+# learns it without parsing YAML -- the same trick '# source-files:' already
+# plays for the guard.
+[ -n "$app_name" ] && printf '# source-app: %s\n' "$app_name"
 
 [ -n "$php_version" ]    && printf 'php_version: "%s"\n' "$php_version"
 [ -n "$nodejs_version" ] && printf 'nodejs_version: "%s"\n' "$nodejs_version"

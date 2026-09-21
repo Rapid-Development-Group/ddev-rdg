@@ -16,11 +16,14 @@ value_of() { derive "$1" | yq -r "$2"; }
 # waiting for someone to notice and add the missing assertion afterwards.
 #
 # To update a golden after a deliberate change:
-#   bash rdg/derive.sh tests/fixtures/<f> 2>/dev/null > tests/expected/<f>.config.platformsh.yaml
+#   bash rdg/derive.sh tests/fixtures/<f> 2>/dev/null > tests/expected/<f>.config.<shape>.yaml
+#
+# The golden's name carries the shape because the generated file's name does:
+# config.platformsh.yaml on Upsun Fixed, config.upsun.yaml on Upsun Flex.
 golden() {
-  local fixture="$1"
+  local fixture="$1" shape="${2:-platformsh}"
   derive "$FIXTURES/$fixture" > "$BATS_TEST_TMPDIR/actual"
-  diff -u "$EXPECTED/$fixture.config.platformsh.yaml" "$BATS_TEST_TMPDIR/actual"
+  diff -u "$EXPECTED/$fixture.config.$shape.yaml" "$BATS_TEST_TMPDIR/actual"
 }
 
 @test "golden: composable subdir generates exactly the committed expected output" {
@@ -37,6 +40,125 @@ golden() {
 
 @test "golden: vite theme generates exactly the committed expected output" {
   golden vite-theme
+}
+
+@test "golden: a nested docroot generates exactly the committed expected output" {
+  golden nested-docroot
+}
+
+@test "an app at the repo root emits no composer_root, whatever its docroot depth" {
+  # composer_root's absence is what tells rdg-sync (and nginx-locations.sh) that the
+  # app root IS the repo root. Emitting 'drupal' here -- the first segment of the
+  # docroot -- would make `ddev composer` run in the wrong directory.
+  local f="$FIXTURES/nested-docroot"
+  [ "$(value_of "$f" '.docroot')" = "drupal/web" ]
+  [ "$(derive "$f" | grep -c '^composer_root:')" -eq 0 ]
+}
+
+@test "a two-segment docroot still finds the theme package.json" {
+  # package.json is looked up at <docroot>/package.json, so this is only correct
+  # while docroot is built from the app root plus the declared web root rather than
+  # assumed to be one segment.
+  local f="$FIXTURES/nested-docroot"
+  derive "$f" | grep -qF 'directory: /var/www/html/drupal/web'
+  derive "$f" | sed -n 's/^# source-files: //p' | grep -qF 'drupal/web/package.json'
+}
+
+@test "golden: upsun flex generates exactly the committed expected output" {
+  golden flex-subdir upsun
+}
+
+@test "golden: a converted repo derives from Flex, ignoring its Fixed leftovers" {
+  # The fixture's .platform.app.yaml and .platform/services.yaml declare php 8.1,
+  # node 18, mariadb 10.6 and a 'public' docroot -- every one of them different
+  # from the Flex values -- so reading the wrong file cannot pass by coincidence.
+  golden flex-stale-fixed upsun
+}
+
+# --- Upsun Flex ---------------------------------------------------------------
+
+@test "flex: runtimes, database and docroot all come from .upsun/config.yaml" {
+  local f="$FIXTURES/flex-subdir"
+  [ "$(value_of "$f" '.php_version')" = "8.4" ]
+  [ "$(value_of "$f" '.nodejs_version')" = "22" ]
+  [ "$(value_of "$f" '.database.type')" = "mariadb" ]
+  [ "$(value_of "$f" '.database.version')" = "11.8" ]
+}
+
+@test "flex: the app root comes from source.root, not from where the file sits" {
+  # .upsun/config.yaml lives at the repo root in every Flex repo, so the app root
+  # cannot be inferred from its path the way it is on Fixed. source.root is
+  # '/drupal/' here, with both slashes optional in practice.
+  local f="$FIXTURES/flex-subdir"
+  [ "$(value_of "$f" '.composer_root')" = "drupal" ]
+  [ "$(value_of "$f" '.docroot')" = "drupal/web" ]
+}
+
+@test "flex: a source.root of '/' or absent means the repo root" {
+  local proj="$BATS_TEST_TMPDIR/rootapp"
+  mkdir -p "$proj/.upsun"
+  printf 'applications:\n  app:\n    type: "composable:26.05"\n    stack:\n      runtimes:\n        - "php@8.4"\n    web:\n      locations:\n        "/":\n          root: "web"\n    source:\n      root: /\n' \
+    > "$proj/.upsun/config.yaml"
+  [ "$(value_of "$proj" '.docroot')" = "web" ]
+  [ "$(derive "$proj" | grep -c '^composer_root:')" -eq 0 ]
+}
+
+@test "flex: only .upsun/config.yaml is hashed, never a leftover services file" {
+  # A .platform/services.yaml the derivation never reads must not be in the
+  # source-files header: hashing it would mean an edit to dead config aborts every
+  # 'ddev start' until someone re-syncs, and the re-sync then changes nothing --
+  # a block with no way out through the command that is supposed to clear it.
+  local header
+  header="$(derive "$FIXTURES/flex-stale-fixed" | sed -n 's/^# source-files: //p')"
+  [ "$header" = ".upsun/config.yaml drupal/web/package.json" ]
+}
+
+@test "flex: the application name is recorded for the host to read back" {
+  # commands/host/rdg-sync runs on the host, which has no yq, and has to pass the
+  # same app name to nginx-locations.sh and derive-redis.sh.
+  [ "$(derive "$FIXTURES/flex-subdir" | sed -n 's/^# source-app: //p')" = "drupal" ]
+}
+
+@test "fixed: no source-app line, because there is no application to name" {
+  [ -z "$(derive "$FIXTURES/composable-subdir" | sed -n 's/^# source-app: //p')" ]
+}
+
+@test "flex: several applications is an error naming RDG_APP, not a silent guess" {
+  local proj="$BATS_TEST_TMPDIR/multi"
+  mkdir -p "$proj/.upsun"
+  printf 'applications:\n  api:\n    type: "composable:26.05"\n  web:\n    type: "composable:26.05"\n' \
+    > "$proj/.upsun/config.yaml"
+  run bash "$REPO_ROOT/rdg/derive.sh" "$proj"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'RDG_APP'
+  printf '%s' "$output" | grep -qF 'api web'
+}
+
+@test "flex: RDG_APP picks one of several applications" {
+  local proj="$BATS_TEST_TMPDIR/multi2"
+  mkdir -p "$proj/.upsun"
+  printf 'applications:\n  api:\n    type: "composable:26.05"\n    stack:\n      runtimes:\n        - "php@8.2"\n  web:\n    type: "composable:26.05"\n    stack:\n      runtimes:\n        - "php@8.4"\n' \
+    > "$proj/.upsun/config.yaml"
+  run env RDG_APP=web bash "$REPO_ROOT/rdg/derive.sh" "$proj"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF 'php_version: "8.4"'
+}
+
+@test "flex: RDG_APP naming an application that does not exist is an error" {
+  local proj="$BATS_TEST_TMPDIR/multi3"
+  mkdir -p "$proj/.upsun"
+  printf 'applications:\n  api:\n    type: "composable:26.05"\n' > "$proj/.upsun/config.yaml"
+  run env RDG_APP=nope bash "$REPO_ROOT/rdg/derive.sh" "$proj"
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | grep -qF 'declares no such application'
+}
+
+@test "flex: crons, mounts and hooks are reported as not translated" {
+  run bash "$REPO_ROOT/rdg/derive.sh" "$FIXTURES/flex-subdir"
+  [ "$status" -eq 0 ]
+  printf '%s' "$output" | grep -qF 'crons declared in .upsun/config.yaml'
+  printf '%s' "$output" | grep -qF 'mounts declared in .upsun/config.yaml'
+  printf '%s' "$output" | grep -qF 'build/deploy hooks declared in .upsun/config.yaml'
 }
 
 @test "composable subdir: php version comes from stack.runtimes" {

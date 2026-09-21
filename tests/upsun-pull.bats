@@ -243,43 +243,149 @@ assert_rejected() {
   done
 }
 
-@test "an Upsun Flex repo is refused as Flex, not as 'not on Upsun'" {
-  # Order-dependence made explicit: a Flex repo has no .platform.app.yaml either,
-  # so it fails the Upsun Fixed test too. If the native check ran first, a Flex
-  # user would be told they are not on Upsun and sent to 'ddev import-db' instead
-  # of to 'ddev pull upsun'.
+@test "an Upsun Flex repo pulls with the upsun provider" {
+  # Flex is a different shape -- .upsun/config.yaml, the 'upsun' CLI,
+  # UPSUN_CLI_TOKEN -- and DDEV has a separate provider recipe for it. The add-on
+  # ships its own vetted providers/upsun.yaml, so this resolves to 'upsun' rather
+  # than refusing (which is what it did before that recipe existed).
   local spec cmd
   rm -f "$PROJ/.platform.app.yaml"
-  mkdir -p "$PROJ/.upsun/local"
-  printf 'id: abc123\n' > "$PROJ/.upsun/local/project.yaml"
+  mkdir -p "$PROJ/.upsun"
+  printf 'applications:\n  drupal:\n    type: "composable:26.05"\n' > "$PROJ/.upsun/config.yaml"
   for spec in $BOTH; do
     IFS=: read -r cmd _ _ <<< "$spec"
     pull_run "$cmd" staging
-    [ "$status" -ne 0 ]
-    printf '%s' "$output" | grep -qF 'Upsun Flex'
-    ! printf '%s' "$output" | grep -qF 'not on Upsun'
+    [ "$status" -eq 0 ]
+    argv_has upsun
+    argv_lacks platform
   done
 }
 
-@test "an Upsun Flex repo is refused rather than pulled with the stock recipe" {
-  # Falling through to 'ddev pull upsun' would use DDEV's stock upsun.yaml, which
-  # does 'mount:download --all --target=/var/www/html' and still carries
-  # db_push_command and files_push_command. Using it silently would hand back the
-  # production push path this add-on deliberately removed.
+@test "a Flex repo with no link file still pulls: the tracked config decides" {
+  # .upsun/local/project.yaml is gitignored, so a fresh clone has none. The
+  # earlier implementation keyed on it, which reported a hosted project as native
+  # and sent the reader to 'ddev import-db'. The provider derives the project id
+  # from that file when it is there and from PLATFORM_PROJECT otherwise; picking
+  # the PROVIDER is not its job.
   local spec cmd
-  mkdir -p "$PROJ/.upsun/local"
-  printf 'id: abc123\n' > "$PROJ/.upsun/local/project.yaml"
+  rm -f "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.upsun"
+  printf 'applications:\n  drupal:\n    type: "composable:26.05"\n' > "$PROJ/.upsun/config.yaml"
+  [ ! -e "$PROJ/.upsun/local/project.yaml" ]
   for spec in $BOTH; do
     IFS=: read -r cmd _ _ <<< "$spec"
     pull_run "$cmd" staging
-    [ "$status" -ne 0 ] || { echo "$cmd: expected refusal, got 0"; return 1; }
-    printf '%s' "$output" | grep -qF 'Upsun Flex'
-    printf '%s' "$output" | grep -qF 'ddev pull upsun'
-    [ ! -f "$ARGV" ] || { echo "$cmd pulled anyway: $(cat "$ARGV")"; return 1; }
+    [ "$status" -eq 0 ]
+    argv_has upsun
   done
 }
 
-# --- the annotation header DDEV parses ---------------------------------------
+@test "a converted repo pulls from Upsun Flex, not from its dead Fixed leftovers" {
+  # The real shape of a repo after 'upsun convert': .upsun/config.yaml is tracked
+  # and live, while .platform/local/project.yaml survived untracked and still names
+  # the pre-conversion Platform.sh project. Choosing the 'platform' provider here
+  # would authenticate against a project that no longer exists -- and on a repo
+  # where the old .platform.app.yaml also came back with a branch checkout, it
+  # would do so silently.
+  local spec cmd
+  mkdir -p "$PROJ/.upsun" "$PROJ/.platform/local"
+  printf 'applications:\n  drupal:\n    type: "composable:26.05"\n' > "$PROJ/.upsun/config.yaml"
+  printf 'id: deadproject\nhost: api.platform.sh\n' > "$PROJ/.platform/local/project.yaml"
+  printf 'olddb:\n  type: mariadb:10.6\n' > "$PROJ/.platform/services.yaml"
+  # .platform.app.yaml is deliberately left in place from setup().
+  [ -f "$PROJ/.platform.app.yaml" ]
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" staging
+    [ "$status" -eq 0 ]
+    argv_has upsun
+    argv_lacks platform
+  done
+}
+
+@test "the unknown-flag message names the provider this repo actually uses" {
+  # It used to say 'ddev pull platform --help' unconditionally, which on a Flex repo
+  # points at a recipe the project does not use. Small, but it is the same
+  # Fixed-is-the-only-shape assumption the rest of this change exists to remove.
+  local spec cmd
+  rm -f "$PROJ/.platform.app.yaml"
+  mkdir -p "$PROJ/.upsun"
+  printf 'applications:\n  drupal:\n    type: "composable:26.05"\n' > "$PROJ/.upsun/config.yaml"
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" --nope
+    [ "$status" -ne 0 ]
+    printf '%s' "$output" | grep -qF 'ddev pull upsun --help'
+  done
+}
+
+@test "on a Fixed repo that message still names the platform provider" {
+  local spec cmd
+  for spec in $BOTH; do
+    IFS=: read -r cmd _ _ <<< "$spec"
+    pull_run "$cmd" --nope
+    [ "$status" -ne 0 ]
+    printf '%s' "$output" | grep -qF 'ddev pull platform --help'
+  done
+}
+
+@test "the upsun recipe accepts PLATFORMSH_CLI_TOKEN, so Flex needs no new token" {
+  # The two CLIs are one binary under two names and an Upsun account token
+  # authenticates both -- confirmed by running `upsun environment:list` against a
+  # real Flex project with PLATFORMSH_CLI_TOKEN's value. Anyone who set that up for
+  # a Fixed repo therefore has to do nothing for a Flex one, and demanding a second
+  # token for the same account would be a manual step with nothing behind it.
+  #
+  # Asserted in all three commands that invoke the CLI, not just auth_command: DDEV
+  # runs each in its own shell, so an export in one does not reach the others.
+  local n
+  n="$(grep -c 'UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}' "$REPO_ROOT/providers/upsun.yaml")"
+  [ "$n" -eq 3 ] || { echo "expected the fallback in 3 commands, found $n"; return 1; }
+  # UPSUN_CLI_TOKEN still wins when both are set.
+  grep -qF 'export UPSUN_CLI_TOKEN="${UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}}"' \
+    "$REPO_ROOT/providers/upsun.yaml"
+}
+
+@test "each command that calls the CLI resolves the token for itself" {
+  # Guards the shape above against someone adding a fifth command later: every
+  # command whose body invokes `upsun` must resolve the token, because DDEV gives
+  # each its own shell.
+  local cmd body
+  for cmd in auth_command db_pull_command files_import_command; do
+    body="$(cmd="$cmd" yq -r '.[strenv(cmd)].command' "$REPO_ROOT/providers/upsun.yaml")"
+    printf '%s' "$body" | grep -q 'upsun ' || continue
+    printf '%s' "$body" | grep -qF 'PLATFORMSH_CLI_TOKEN:-' \
+      || { echo "$cmd calls upsun but does not resolve the token"; return 1; }
+  done
+}
+
+@test "no push command exists in either provider recipe" {
+  # Both recipes have db_push_command and files_push_command deleted on purpose:
+  # a repo that pins PLATFORM_ENVIRONMENT for pulling turns DDEV's "a stray push
+  # fails safe" into "a stray push targets production".
+  local recipe
+  for recipe in platform upsun; do
+    ! grep -q '^db_push_command:' "$REPO_ROOT/providers/$recipe.yaml"
+    ! grep -q '^files_push_command:' "$REPO_ROOT/providers/$recipe.yaml"
+  done
+}
+
+@test "neither provider recipe carries the marker that would let DDEV revert it" {
+  local recipe
+  for recipe in platform upsun; do
+    ! grep -qF '#ddev-generated' "$REPO_ROOT/providers/$recipe.yaml"
+  done
+}
+
+@test "the upsun recipe downloads one mount, into DDEV's own files dir" {
+  # The stock recipe does 'mount:download --all --target=/var/www/html', which on
+  # a repo whose app root is a subdirectory puts the public files BESIDE the
+  # docroot instead of inside it, and drags down every other mount.
+  grep -qF -- '--mount=web/sites/default/files' "$REPO_ROOT/providers/upsun.yaml"
+  grep -qF -- '--target="${DDEV_FILES_DIR}"' "$REPO_ROOT/providers/upsun.yaml"
+  ! grep -qF -- 'mount:download --all' "$REPO_ROOT/providers/upsun.yaml" \
+    || grep -n 'mount:download --all' "$REPO_ROOT/providers/upsun.yaml" | grep -q '^\s*[0-9]*:\s*#'
+}
 
 @test "both commands carry the marker and the annotations ddev needs" {
   # Without ## Description DDEV still registers the command but shows it unlabelled

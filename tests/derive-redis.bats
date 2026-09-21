@@ -94,3 +94,36 @@ second:
   type: redis:8.0'
   [ "$status" -eq 0 ]
 }
+
+# --- Upsun Flex ---------------------------------------------------------------
+
+# On Flex the app and the services live in one document, so both arguments are
+# the same file and the application name is the third argument.
+derive_redis_flex() {
+  bash "$REPO_ROOT/rdg/derive-redis.sh" "$1" "$1" "$2" 2>/dev/null
+}
+
+@test "flex: the image comes from the related service in .upsun/config.yaml" {
+  [ "$(derive_redis_flex "$FIXTURES/flex-subdir/.upsun/config.yaml" drupal)" = "redis:8.0" ]
+}
+
+@test "flex: a leftover .platform/services.yaml cannot supply the version" {
+  # The stale fixture's leftover declares redis 6.2 against Flex's 8.0. Passing
+  # the Flex document as the services file is the whole defence -- rdg-sync must
+  # never hand this script /var/www/html/.platform/services.yaml on a Flex repo,
+  # and tests/rdg-sync.bats asserts the call it actually builds.
+  [ "$(derive_redis_flex "$FIXTURES/flex-stale-fixed/.upsun/config.yaml" drupal)" = "redis:8.0" ]
+  grep -qF 'redis:6.2' "$FIXTURES/flex-stale-fixed/.platform/services.yaml"
+}
+
+@test "flex: an app with no Redis relationship prints nothing" {
+  local cfg="$BATS_TEST_TMPDIR/noredis.yaml"
+  printf 'applications:\n  app:\n    relationships:\n      database: "mysqldb:mysql"\nservices:\n  mysqldb:\n    type: mariadb:11.8\n' > "$cfg"
+  [ -z "$(derive_redis_flex "$cfg" app)" ]
+}
+
+@test "flex: a valkey service derives the valkey image, as on fixed" {
+  local cfg="$BATS_TEST_TMPDIR/valkey.yaml"
+  printf 'applications:\n  app:\n    relationships:\n      redis: "kv:valkey"\nservices:\n  kv:\n    type: valkey:8.1\n' > "$cfg"
+  [ "$(derive_redis_flex "$cfg" app)" = "valkey/valkey:8.1" ]
+}

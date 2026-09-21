@@ -13,51 +13,61 @@
 #
 #   Upsun Fixed (formerly Platform.sh) -- .platform/ directory, 'platform' CLI,
 #     PLATFORMSH_CLI_TOKEN, 'ddev pull platform'.
-#   Upsun Flex -- .upsun/ directory, 'upsun' CLI, UPSUN_CLI_TOKEN,
+#   Upsun Flex -- .upsun/config.yaml, 'upsun' CLI, UPSUN_CLI_TOKEN,
 #     'ddev pull upsun'.
 #
-# The tracked project link file is what distinguishes them. Both recipes use
-# PLATFORM_ENVIRONMENT for the environment, so nothing else here changes.
+# Both recipes read the environment from PLATFORM_ENVIRONMENT, so nothing else
+# here changes between them.
+#
+# The decision comes from rdg_mode, i.e. from the TRACKED hosting config -- not
+# from .upsun/local/project.yaml or .platform/local/project.yaml. Those link files
+# are gitignored, so:
+#
+#   - a fresh clone of a Flex repo has no .upsun/local/project.yaml at all, and
+#     keying on it reported a very-much-hosted project as "not on Upsun", sending
+#     the reader to 'ddev import-db';
+#   - a repo that 'upsun convert' moved from Fixed to Flex KEEPS its old
+#     .platform/local/project.yaml, naming the dead pre-conversion project, so a
+#     link-file-driven answer can point a Flex pull at the Fixed provider and a
+#     project id that no longer exists.
+#
+# .upsun/config.yaml is committed and is the file being deployed from.
 rdg_pull_provider() {
   local self="$1" root="$2"
 
   # shellcheck source=rdg/mode.sh
   source "$(dirname "${BASH_SOURCE[0]}")/mode.sh"
 
-  # Flex is checked BEFORE the not-on-Upsun case, and the order is load-bearing: a
-  # Flex repo has no .platform.app.yaml either -- its config lives in
-  # .upsun/config.yaml -- so it fails the Upsun Fixed test too. Checking native
-  # first would answer "not on Upsun" for a project that is very much on Upsun, and
-  # send the reader to 'ddev import-db' when what they want is 'ddev pull upsun'.
-  if [ -f "$root/.upsun/local/project.yaml" ]; then
-    # Refuses rather than falling through to 'ddev pull upsun'. DDEV's stock
-    # upsun.yaml is not the recipe this add-on vets: it does
-    # 'mount:download --all --target=/var/www/html', which puts the public files
-    # beside the docroot instead of inside it and drags down every other mount,
-    # and it still carries db_push_command and files_push_command. Silently using
-    # it would hand back a production push path that was deliberately removed.
-    printf '%s: this project is linked to Upsun Flex (.upsun/local/project.yaml).\n' "$self" >&2
-    printf 'ddev-rdg only ships a vetted pull recipe for Upsun Fixed, so this refuses\n' >&2
-    printf "rather than fall back to DDEV's stock upsun recipe, which restores the push\n" >&2
-    printf 'commands and downloads mounts to the wrong place.\n' >&2
-    printf 'Use "ddev pull upsun" directly if that is what you want.\n' >&2
-    return 78
-  fi
+  local mode
+  mode="$(rdg_mode "$root")"
 
-  # Not on Upsun at all. Without this the command would invoke 'ddev pull platform'
-  # against a provider recipe with no project to authenticate to, and the failure
-  # would name the platform CLI rather than the actual problem. This is the "some
-  # things are not possible in native mode" case, stated where it is hit.
-  if ! rdg_is_upsun_fixed "$root"; then
-    printf '%s: this project is not on Upsun, so there is nothing to pull from.\n' "$self" >&2
-    printf 'Its .ddev/config.yaml is the source of truth and there is no hosted\n' >&2
-    printf 'environment behind it.\n\n' >&2
-    printf 'Load a database from a dump instead:\n\n' >&2
-    printf '  ddev import-db --file=<dump.sql.gz>\n\n' >&2
-    return 78
-  fi
+  case "$mode" in
+    flex)
+      # ddev-rdg ships its own providers/upsun.yaml rather than letting DDEV's
+      # stock recipe be used: that one does
+      # 'mount:download --all --target=/var/www/html', which puts the public
+      # files beside the docroot instead of inside it and drags down every other
+      # mount, and it still carries db_push_command and files_push_command. Ours
+      # downloads one mount and has no push path. See providers/upsun.yaml.
+      RDG_PULL_PROVIDER=upsun
+      return 0
+      ;;
+    fixed)
+      RDG_PULL_PROVIDER=platform
+      return 0
+      ;;
+  esac
 
-  RDG_PULL_PROVIDER=platform
+  # Not on Upsun at all. Without this the command would invoke a pull against a
+  # provider recipe with no project to authenticate to, and the failure would name
+  # the CLI rather than the actual problem. This is the "some things are not
+  # possible in native mode" case, stated where it is hit.
+  printf '%s: this project is not on Upsun, so there is nothing to pull from.\n' "$self" >&2
+  printf 'Its .ddev/config.yaml is the source of truth and there is no hosted\n' >&2
+  printf 'environment behind it.\n\n' >&2
+  printf 'Load a database from a dump instead:\n\n' >&2
+  printf '  ddev import-db --file=<dump.sql.gz>\n\n' >&2
+  return 78
 }
 
 # rdg_pull_parse_env <command-name> [environment]
@@ -86,10 +96,16 @@ rdg_pull_parse_env() {
   case "$1" in
     -*)
       # Deliberately no flags: the whole point of these two commands is that the
-      # environment is positional. Anything else belongs on 'ddev pull platform'.
+      # environment is positional. Anything else belongs on 'ddev pull <provider>'.
+      #
+      # RDG_PULL_PROVIDER, not a hardcoded 'platform': rdg_pull_provider always runs
+      # first, and naming the wrong recipe on a Flex repo sends the reader to a
+      # provider their project does not use. The fallback is for a caller that
+      # somehow parses arguments without resolving the provider.
       printf '%s: unknown flag %s -- this command takes only an environment name.\n' \
         "$self" "$1" >&2
-      printf 'For DDEV pull flags (--skip-import and friends) use: ddev pull platform --help\n' >&2
+      printf 'For DDEV pull flags (--skip-import and friends) use: ddev pull %s --help\n' \
+        "${RDG_PULL_PROVIDER:-platform}" >&2
       return 64
       ;;
     *[,=]*)

@@ -1,0 +1,77 @@
+# Upsun Flex. Modelled on stockmarketmedia, the first repo in the fleet that
+# 'upsun convert' turned into this shape: one document, the app under
+# .applications.<name>, services under .services, and the app root declared by
+# source.root rather than by where the file sits.
+applications:
+    drupal:
+        type: 'composable:26.05'
+        container_profile: BALANCED
+        stack:
+            runtimes:
+                - 'php@8.4':
+                    extensions:
+                        - apcu
+                        - igbinary
+                        - redis
+                - 'nodejs@22'
+            packages:
+                - yarn
+        variables:
+            php:
+                memory_limit: 256M
+        relationships:
+            database: 'mysqldb:mysql'
+            redis: 'rediscache:redis'
+        web:
+            locations:
+                '/':
+                    root: 'web'
+                    passthru: '/index.php'
+                    allow: false
+                '/.well-known':
+                    root: 'web/.well-known'
+                    scripts: false
+                    allow: true
+                '/drupal-integrations':
+                    root: 'landing-pages/drupal-integrations'
+                    index:
+                        - 'index.html'
+                # Outside the docroot AND a PHP entry point. nginx-locations.sh
+                # must skip it rather than emit a static try_files block that
+                # would 404 with confidence.
+                '/sendgrid-webhook':
+                    root: 'sendgrid-monitor/public'
+                    scripts: true
+                    passthru: '/sendgrid-webhook/webhook.php'
+                    allow: false
+        hooks:
+            build: |
+                composer install
+            deploy: |
+                cd web && drush -y updatedb
+        mounts:
+            '/web/sites/default/files':
+                source: service
+                service: network-storage
+                source_path: 'files'
+        crons:
+            drupal:
+                spec: '*/10 * * * *'
+                commands:
+                    start: 'cd web && drush core-cron'
+        source:
+            root: /drupal/
+services:
+    mysqldb:
+        type: mariadb:11.8
+        container_profile: HIGHER_MEMORY
+    rediscache:
+        type: redis:8.0
+        configuration:
+            maxmemory_policy: volatile-lfu
+    network-storage:
+        type: network-storage:2.0
+routes:
+    'https://{all}/':
+        type: upstream
+        upstream: 'drupal:http'
