@@ -141,8 +141,7 @@ project is on. Both shapes are supported, and the shape decides the provider:
 
 - **Upsun Fixed** — the rebranded Platform.sh: `.platform/`, the `platform` CLI,
   `PLATFORMSH_CLI_TOKEN`, DDEV's `platform` provider.
-- **Upsun Flex** — `.upsun/config.yaml`, the `upsun` CLI, `UPSUN_CLI_TOKEN`, DDEV's
-  `upsun` provider.
+- **Upsun Flex** — `.upsun/config.yaml`, the `upsun` CLI, DDEV's `upsun` provider.
 
 Neither uses DDEV's stock recipe. Both `providers/platform.yaml` and
 `providers/upsun.yaml` are vetted copies with two changes: `files_import_command`
@@ -151,6 +150,12 @@ into `/var/www/html` (mount paths are relative to the *app* root, so the stock v
 puts public files beside the docroot and drags down `private/` with them), and
 `db_push_command` / `files_push_command` are deleted. Both files omit the
 `#ddev-generated` marker so DDEV never reverts them.
+
+**One token covers both.** The two CLIs are the same binary under two names, and an
+Upsun account's API token authenticates either, so `providers/upsun.yaml` falls back to
+`PLATFORMSH_CLI_TOKEN` when `UPSUN_CLI_TOKEN` is unset. Anyone who set the token up once
+for a Fixed repo has nothing to do for a Flex one. Set `UPSUN_CLI_TOKEN` only if the two
+really are different accounts; it wins when both are present.
 
 Which provider is chosen comes from the tracked hosting config, never from
 `.upsun/local/project.yaml` or `.platform/local/project.yaml` — both are gitignored, so

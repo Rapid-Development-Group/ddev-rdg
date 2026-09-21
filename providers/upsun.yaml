@@ -6,9 +6,9 @@
 # See the comments at each. To re-diff after a DDEV upgrade, delete this file, run
 # `ddev restart` to regenerate the stock version, then re-apply both changes.
 #
-# This is the UPSUN FLEX recipe -- .upsun/config.yaml, the `upsun` CLI and
-# UPSUN_CLI_TOKEN. providers/platform.yaml is its Upsun Fixed counterpart, for the
-# repos that still have .platform.app.yaml. rdg/pull-args.sh picks between them from
+# This is the UPSUN FLEX recipe -- .upsun/config.yaml and the `upsun` CLI.
+# providers/platform.yaml is its Upsun Fixed counterpart, for the repos that still
+# have .platform.app.yaml. rdg/pull-args.sh picks between them from
 # the tracked hosting config, so a repo that 'upsun convert' moved to Flex never
 # reaches the Fixed recipe even while .platform/local/project.yaml is still on disk
 # naming the dead pre-conversion project.
@@ -30,7 +30,10 @@
 # To use this configuration,
 
 # 1. Check out the site from Upsun and then configure it with `ddev config`. You'll want to use `ddev start` and make sure the basic functionality is working.
-# 2. Obtain and configure an API token.
+# 2. Obtain and configure an API token -- SKIP THIS if you already have
+#    PLATFORMSH_CLI_TOKEN set globally for an Upsun Fixed repo. The two CLIs are the
+#    same binary and one Upsun account token authenticates both, so this recipe falls
+#    back to PLATFORMSH_CLI_TOKEN when UPSUN_CLI_TOKEN is unset.
 #    a. Login to the Upsun Dashboard and go to My Profile->API Tokens to create an API token for DDEV to use.
 #    b. Add the API token to the `web_environment` section in your global ddev configuration at ~/.ddev/global_config.yaml:
 #    ```yaml
@@ -96,7 +99,23 @@ auth_command:
       export PLATFORM_ENVIRONMENT="$(git branch --show-current)"
     fi
 
-    if [ -z "${UPSUN_CLI_TOKEN:-}" ]; then echo "Please make sure you have set UPSUN_CLI_TOKEN." && exit 1; fi
+    # The Upsun and Platform.sh CLIs are the same binary under two names, and an
+    # Upsun account's API token authenticates both -- verified against this project
+    # by running `upsun environment:list` with PLATFORMSH_CLI_TOKEN's value. So a
+    # developer who already set PLATFORMSH_CLI_TOKEN up for a Fixed repo needs to do
+    # nothing at all for a Flex one. Requiring a second token for the same account
+    # would be a manual step with no purpose behind it.
+    #
+    # UPSUN_CLI_TOKEN still wins when both are set, for the case where they really
+    # are different accounts.
+    export UPSUN_CLI_TOKEN="${UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}}"
+    if [ -z "${UPSUN_CLI_TOKEN:-}" ]; then
+      echo "No API token found. Set either of these once, globally:"
+      echo '  ddev config global --web-environment-add="UPSUN_CLI_TOKEN=..."'
+      echo '  ddev config global --web-environment-add="PLATFORMSH_CLI_TOKEN=..."'
+      echo "Create one in the Upsun console under My Profile -> API Tokens."
+      exit 1
+    fi
     if [ -z "${PLATFORM_PROJECT:-}" ]; then
       echo "Please make sure you have set PLATFORM_PROJECT." && exit 1
     else
@@ -127,6 +146,16 @@ db_pull_command:
       export PLATFORM_ENVIRONMENT
     fi
 
+    # The Upsun and Platform.sh CLIs are the same binary under two names, and an
+    # Upsun account's API token authenticates both -- verified against this project
+    # by running `upsun environment:list` with PLATFORMSH_CLI_TOKEN's value. So a
+    # developer who already set PLATFORMSH_CLI_TOKEN up for a Fixed repo needs to do
+    # nothing at all for a Flex one. Requiring a second token for the same account
+    # would be a manual step with no purpose behind it.
+    #
+    # UPSUN_CLI_TOKEN still wins when both are set, for the case where they really
+    # are different accounts.
+    export UPSUN_CLI_TOKEN="${UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}}"
     export UPSUN_CLI_NO_INTERACTION=1
     # /tmp/db_relationships.yaml is the full yaml output of the database relationships
     db_relationships_file=/tmp/db_relationships.yaml
@@ -167,6 +196,16 @@ files_import_command:
         export PLATFORM_ENVIRONMENT
     fi
 
+    # The Upsun and Platform.sh CLIs are the same binary under two names, and an
+    # Upsun account's API token authenticates both -- verified against this project
+    # by running `upsun environment:list` with PLATFORMSH_CLI_TOKEN's value. So a
+    # developer who already set PLATFORMSH_CLI_TOKEN up for a Fixed repo needs to do
+    # nothing at all for a Flex one. Requiring a second token for the same account
+    # would be a manual step with no purpose behind it.
+    #
+    # UPSUN_CLI_TOKEN still wins when both are set, for the case where they really
+    # are different accounts.
+    export UPSUN_CLI_TOKEN="${UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}}"
     export UPSUN_CLI_NO_INTERACTION=1
     # Changed from the stock recipe, which does
     #   mount:download --all --target=/var/www/html

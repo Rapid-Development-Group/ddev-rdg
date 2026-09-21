@@ -303,8 +303,8 @@ they work on both shapes. Which DDEV provider they invoke depends on the repo:
   CLI, `PLATFORMSH_CLI_TOKEN`, `.platform.app.yaml` + `.platform/services.yaml`. Pulls go
   through DDEV's `platform` provider.
 - **Upsun Flex** is a different shape — one `.upsun/config.yaml` with top-level
-  `applications:` / `services:` / `routes:`, the `upsun` CLI, `UPSUN_CLI_TOKEN`. Pulls go
-  through DDEV's `upsun` provider.
+  `applications:` / `services:` / `routes:`, the `upsun` CLI. Pulls go through DDEV's
+  `upsun` provider.
 
 Neither uses DDEV's stock recipe. The add-on ships a vetted copy of each —
 `providers/platform.yaml` and `providers/upsun.yaml` — with the same two changes: one
@@ -312,10 +312,12 @@ mount downloaded into `$DDEV_FILES_DIR` instead of every mount into `/var/www/ht
 both push commands deleted. The stock versions put public files *beside* the docroot on
 any repo whose app root is a subdirectory, and still ship a production push path.
 
-**The token differs.** Fixed wants `PLATFORMSH_CLI_TOKEN`, Flex wants `UPSUN_CLI_TOKEN`,
-and a repo that has been converted needs the second one even though the first is
-probably still in `~/.ddev/global_config.yaml` from the last project you worked on. The
-recipe says which one is missing.
+**The token does not differ.** The `upsun` and `platform` CLIs are the same binary under
+two names, and an Upsun account's API token authenticates either, so the Flex recipe
+falls back to `PLATFORMSH_CLI_TOKEN` when `UPSUN_CLI_TOKEN` is unset. If you already have
+the former in `~/.ddev/global_config.yaml` from a Fixed repo — and if you have used one,
+you do — a Flex repo needs nothing. Set `UPSUN_CLI_TOKEN` only when the two are genuinely
+different accounts; it wins when both are set.
 
 **Which provider you get is decided by the tracked config**, not by
 `.upsun/local/project.yaml` or `.platform/local/project.yaml`. Both of those are
@@ -558,11 +560,12 @@ same `container_port`, which DDEV rejects at parse time. That rejection takes ev
 `ddev` command with it, including the `ddev rdg-sync` that would fix it, so the guard
 stopping you first is the friendly outcome.
 
-**The token is `UPSUN_CLI_TOKEN`**, not `PLATFORMSH_CLI_TOKEN`. Get one from My Profile →
-API Tokens in the Upsun console:
+**The token is the one you already have.** The Flex recipe falls back to
+`PLATFORMSH_CLI_TOKEN`, so there is nothing to do if a Fixed repo ever worked on this
+machine. From scratch, either name works, set once:
 
 ```sh
-ddev config global --web-environment-add="UPSUN_CLI_TOKEN=…"
+ddev config global --web-environment-add="PLATFORMSH_CLI_TOKEN=…"
 ```
 
 **Several applications need `RDG_APP`.** A Flex config can declare more than one under

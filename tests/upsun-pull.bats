@@ -329,6 +329,36 @@ assert_rejected() {
   done
 }
 
+@test "the upsun recipe accepts PLATFORMSH_CLI_TOKEN, so Flex needs no new token" {
+  # The two CLIs are one binary under two names and an Upsun account token
+  # authenticates both -- confirmed by running `upsun environment:list` against a
+  # real Flex project with PLATFORMSH_CLI_TOKEN's value. Anyone who set that up for
+  # a Fixed repo therefore has to do nothing for a Flex one, and demanding a second
+  # token for the same account would be a manual step with nothing behind it.
+  #
+  # Asserted in all three commands that invoke the CLI, not just auth_command: DDEV
+  # runs each in its own shell, so an export in one does not reach the others.
+  local n
+  n="$(grep -c 'UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}' "$REPO_ROOT/providers/upsun.yaml")"
+  [ "$n" -eq 3 ] || { echo "expected the fallback in 3 commands, found $n"; return 1; }
+  # UPSUN_CLI_TOKEN still wins when both are set.
+  grep -qF 'export UPSUN_CLI_TOKEN="${UPSUN_CLI_TOKEN:-${PLATFORMSH_CLI_TOKEN:-}}"' \
+    "$REPO_ROOT/providers/upsun.yaml"
+}
+
+@test "each command that calls the CLI resolves the token for itself" {
+  # Guards the shape above against someone adding a fifth command later: every
+  # command whose body invokes `upsun` must resolve the token, because DDEV gives
+  # each its own shell.
+  local cmd body
+  for cmd in auth_command db_pull_command files_import_command; do
+    body="$(cmd="$cmd" yq -r '.[strenv(cmd)].command' "$REPO_ROOT/providers/upsun.yaml")"
+    printf '%s' "$body" | grep -q 'upsun ' || continue
+    printf '%s' "$body" | grep -qF 'PLATFORMSH_CLI_TOKEN:-' \
+      || { echo "$cmd calls upsun but does not resolve the token"; return 1; }
+  done
+}
+
 @test "no push command exists in either provider recipe" {
   # Both recipes have db_push_command and files_push_command deleted on purpose:
   # a repo that pins PLATFORM_ENVIRONMENT for pulling turns DDEV's "a stray push
