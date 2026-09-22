@@ -9,18 +9,27 @@ setup() {
   ! grep -qiE 'webpack|vite' "$SCRIPT"
 }
 
-@test "the watcher runs the repo's own start script" {
-  # Scoped to active lines: the file's own explanatory comment also says
-  # 'yarn start', so a whole-file grep passes even if the real invocation
-  # is mutated to something else entirely.
-  grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qF 'yarn start'
+@test "the watcher runs the script it was given, not a hardcoded one" {
+  # Scoped to active lines throughout this file: the script's own explanatory
+  # comments quote the same strings, so a whole-file grep would be satisfied by
+  # prose even if the real invocation were mutated to something else entirely.
+  grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE 'yarn[[:space:]]+"\$theme_script"'
 }
 
-@test "the watcher execs its start command instead of a bare invocation" {
-  # A bare (non-exec'd) start would let a shell wrapper swallow stop signals.
+@test "the watcher defaults to 'start' when given no argument" {
+  # DDEV never re-derives on an add-on upgrade, so every config.platformsh.yaml
+  # generated before the argument existed passes nothing -- and those keep working
+  # only because of this default. Dropping it would break the daemon on every
+  # already-migrated repo in the fleet, at upgrade time, with no config change to
+  # point at.
+  grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qF 'theme_script="${1:-start}"'
+}
+
+@test "the watcher execs its watch command instead of a bare invocation" {
+  # A bare (non-exec'd) invocation would let a shell wrapper swallow stop signals.
   # Not a live risk today -- DDEV's stopasgroup=true masks it -- but nothing
   # else here would catch the regression if the script grows a pipeline first.
-  grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE '^[[:space:]]*exec[[:space:]]+.*yarn start'
+  grep -v '^[[:space:]]*#' "$SCRIPT" | grep -qE '^[[:space:]]*exec[[:space:]]+.*yarn[[:space:]]+"\$theme_script"'
 }
 
 @test "the watcher's cd into the docroot has a failure guard" {

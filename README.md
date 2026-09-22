@@ -278,6 +278,17 @@ container name is not, matching what DDEV does for the project's own routers.
 asset daemon, the dev-server port, the build toolchain, and nginx snippets for
 `web.locations` outside the docroot.
 
+The theme daemon runs a script the repo declares, so the bundler is never named here:
+`dev` if `package.json` has one, `start` otherwise, and the chosen name goes into the
+generated `command:` so it is visible without opening `package.json`. Neither means no
+daemon, said out loud rather than silently.
+
+The dev-server port is `5173` when the theme builds with Vite and `35729` otherwise.
+Vite counts whether it is a declared dependency **or** just named in the script being
+run — a theme that gets it through a wrapper package (`rdg-vite` is ours) lists no
+`vite` of its own, and reading only the dependency list hands that repo `35729` while
+its dev server listens on `5173`.
+
 One exception in that last item: a location declaring `scripts: true` is a PHP entry
 point, which needs `fastcgi_pass` and a `SCRIPT_FILENAME` rather than the static
 `try_files` block this generates. Those are skipped and named on stderr — write them by

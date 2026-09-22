@@ -1,0 +1,11 @@
+{
+  "name": "libraries-custom",
+  "private": true,
+  "scripts": {
+    "dev": "pm2-runtime \"DEBUG=* vite -l info\" --time",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "rdg-vite": "https://example.invalid/rdg-vite"
+  }
+}

@@ -46,6 +46,10 @@ golden() {
   golden nested-docroot
 }
 
+@test "golden: a dev-script vite theme generates exactly the committed expected output" {
+  golden vite-dev-script
+}
+
 @test "an app at the repo root emits no composer_root, whatever its docroot depth" {
   # composer_root's absence is what tells rdg-sync (and nginx-locations.sh) that the
   # app root IS the repo root. Emitting 'drupal' here -- the first segment of the
@@ -346,9 +350,60 @@ golden() {
   # that crash-loops with "No such file or directory" 15 times and then gives up.
   local cmd rel
   cmd="$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].command')"
-  [ "$cmd" = "bash /mnt/ddev_config/rdg/theme-watch.sh" ]
+  [ "$cmd" = "bash /mnt/ddev_config/rdg/theme-watch.sh start" ]
   rel="${cmd#bash /mnt/ddev_config/}"
+  rel="${rel%% *}"          # drop the script-name argument
   [ -f "$REPO_ROOT/$rel" ]
+}
+
+@test "the daemon command names which script to run, so the watcher needs no guess" {
+  # Both names are in use across the fleet. Passing it here rather than letting
+  # theme-watch.sh look it up keeps the choice visible in the committed config,
+  # and the pre-start guard already hashes package.json -- so a repo that renames
+  # its script is refused a start until someone re-syncs, rather than silently
+  # running a daemon that no longer exists.
+  [ "$(value_of "$FIXTURES/composable-subdir" '.web_extra_daemons[0].command')" = \
+    "bash /mnt/ddev_config/rdg/theme-watch.sh start" ]
+  [ "$(value_of "$FIXTURES/vite-dev-script" '.web_extra_daemons[0].command')" = \
+    "bash /mnt/ddev_config/rdg/theme-watch.sh dev" ]
+}
+
+@test "a theme declaring only a dev script still gets a daemon" {
+  [ "$(value_of "$FIXTURES/vite-dev-script" '.web_extra_daemons[0].name')" = "theme" ]
+  [ "$(value_of "$FIXTURES/vite-dev-script" '.web_extra_daemons[0].directory')" = "/var/www/html/web" ]
+}
+
+@test "dev wins over start when a repo declares both" {
+  # A repo carrying both names is mid-migration onto the newer toolchain, so the
+  # newer name is the one that reflects where the repo is going.
+  local p="$BATS_TEST_TMPDIR/both"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{"name":"x","scripts":{"start":"webpack watch","dev":"vite"}}\n' > "$p/web/package.json"
+  [ "$(value_of "$p" '.web_extra_daemons[0].command')" = \
+    "bash /mnt/ddev_config/rdg/theme-watch.sh dev" ]
+  # And the port follows the script actually chosen, not the one passed over.
+  [ "$(value_of "$p" '.web_extra_exposed_ports[0].container_port')" = "5173" ]
+}
+
+@test "a whitespace-only dev script falls through to start rather than to nothing" {
+  local p="$BATS_TEST_TMPDIR/blank-dev-real-start"
+  mkdir -p "$p/.platform" "$p/web"
+  printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
+  printf 'maindb:\n  type: mariadb:10.11\n' > "$p/.platform/services.yaml"
+  printf '{"name":"x","scripts":{"dev":"   ","start":"webpack watch"}}\n' > "$p/web/package.json"
+  [ "$(value_of "$p" '.web_extra_daemons[0].command')" = \
+    "bash /mnt/ddev_config/rdg/theme-watch.sh start" ]
+}
+
+@test "vite reached through a wrapper package still gets vite's port" {
+  # rdg-vite is ours and depends on vite, so the theme never lists vite itself.
+  # Reading only the dependency list hands such a repo 35729 while its dev server
+  # listens on 5173: the port is exposed and nothing answers on it.
+  [ "$(value_of "$FIXTURES/vite-dev-script" '.web_extra_exposed_ports[0].container_port')" = "5173" ]
+  [ "$(jq -r "[.dependencies, .devDependencies] | add // {} | has(\"vite\")" \
+      "$FIXTURES/vite-dev-script/web/package.json")" = "false" ]
 }
 
 @test "webpack-family theme gets the livereload port" {
@@ -390,7 +445,7 @@ golden() {
   [ "$(value_of "$FIXTURES/no-theme" '.web_extra_exposed_ports')" = "null" ]
 }
 
-@test "a package.json with no start script warns and emits no daemon" {
+@test "a package.json with neither a dev nor a start script warns and emits no daemon" {
   local p="$BATS_TEST_TMPDIR/nostart"
   mkdir -p "$p/.platform" "$p/web"
   printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
@@ -399,7 +454,7 @@ golden() {
   run bash "$REPO_ROOT/rdg/derive.sh" "$p"
   [ "$status" -eq 0 ]
   # grep, not [[ ]] — see the Global Constraint on bats assertions.
-  printf '%s' "$output" | grep -qF "no 'start' script"
+  printf '%s' "$output" | grep -qF "no 'dev' or 'start' script"
   [ "$(bash "$REPO_ROOT/rdg/derive.sh" "$p" 2>/dev/null | yq -r '.web_extra_daemons')" = "null" ]
 }
 
@@ -445,8 +500,8 @@ golden() {
   [ "$status" -eq 0 ]
   printf '%s' "$output" | grep -qF "web/package.json"
   printf '%s' "$output" | grep -qF "not valid JSON"
-  # It must be the honest diagnosis, not the "no start script" false positive.
-  if printf '%s' "$output" | grep -qF "no 'start' script"; then false; fi
+  # It must be the honest diagnosis, not the "no script" false positive.
+  if printf '%s' "$output" | grep -qF "no 'dev' or 'start' script"; then false; fi
   [ "$(value_of "$p" '.php_version')" = "8.3" ]
   [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
   [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
@@ -472,7 +527,7 @@ golden() {
   derive "$p" | yq -e '.' > /dev/null
 }
 
-@test "a whitespace-only start script counts as absent" {
+@test "a whitespace-only start script counts as absent when there is no dev either" {
   local p="$BATS_TEST_TMPDIR/blank-start"
   mkdir -p "$p/.platform" "$p/web"
   printf 'type: "php:8.3"\nweb:\n  locations:\n    "/":\n      root: "web"\n' > "$p/.platform.app.yaml"
@@ -480,7 +535,7 @@ golden() {
   printf '{"name":"x","scripts":{"start":"   "}}\n' > "$p/web/package.json"
   run bash "$REPO_ROOT/rdg/derive.sh" "$p"
   [ "$status" -eq 0 ]
-  printf '%s' "$output" | grep -qF "no 'start' script"
+  printf '%s' "$output" | grep -qF "no 'dev' or 'start' script"
   [ "$(value_of "$p" '.web_extra_daemons')" = "null" ]
   [ "$(value_of "$p" '.web_extra_exposed_ports')" = "null" ]
 }

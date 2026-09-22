@@ -1,0 +1,14 @@
+name: app
+type: "php:8.3"
+
+dependencies:
+  nodejs:
+    nodejs: "20"
+
+relationships:
+  database: "maindb:mysql"
+
+web:
+  locations:
+    "/":
+      root: "web"

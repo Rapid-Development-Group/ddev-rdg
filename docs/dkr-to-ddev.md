@@ -288,8 +288,22 @@ Under `dkr`, a second container (`node:16`) existed only to run `yarn docker-sta
 `yarn install`, then a bundler in watch mode — with livereload published on 35729.
 
 DDEV does the same work inside the web container via `web_extra_daemons`, so there is no
-second container. The daemon is named `theme`, not `webpack`: it runs the repo's own
-`yarn start`, so swapping bundlers needs no change here.
+second container. The daemon is named `theme`, not `webpack`: it runs a script the repo
+declares, so swapping bundlers needs no change here. `ddev rdg-sync` takes the `dev`
+script from `package.json` if there is one and `start` otherwise, and writes the name it
+chose into the generated `command:` — so you can see which one a project runs without
+opening `package.json`. A repo with neither gets no daemon, and `rdg-sync` says so.
+
+**A Vite dev server needs the DDEV hostname allowed.** Vite refuses requests for a host
+it does not recognise — *"Blocked request. This host … is not allowed"*, served as a 403
+that looks like a routing fault but is not. Under `dkr` the host was the node container's
+name, so our shared config pins `allowedHosts: ['vite', 'localhost']`; under DDEV it is
+`<project>.ddev.site`, and with a worktree per branch the project name varies. Allow the
+suffix rather than a literal, in the theme's `vite.config.*`:
+
+```js
+server: { allowedHosts: ['.ddev.site'] }
+```
 
 ```sh
 ddev exec supervisorctl status webextradaemons:theme
@@ -798,9 +812,9 @@ web_extra_exposed_ports:
       https_port: 35729
 ```
 
-`theme-watch.sh` already does `yarn --network-concurrency 1` and then `exec yarn start`,
-which is exactly what a `docker-start` script does — so repos with one need no change to
-`package.json`. It also carries the two fixes that container needed: polling (a mounted
+`theme-watch.sh` already does `yarn --network-concurrency 1` and then runs the derived
+script, which is exactly what a `docker-start` script does — so repos with one need no
+change to `package.json`. It also carries the two fixes that container needed: polling (a mounted
 filesystem produces no inotify events) and the `arm64` libpng build flag. See
 [The theme watcher](#the-theme-watcher).
 
