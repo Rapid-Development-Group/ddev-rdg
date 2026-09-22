@@ -13,7 +13,7 @@ database:
     version: "11.8"
 web_extra_daemons:
     - name: theme
-      command: "bash /mnt/ddev_config/rdg/theme-watch.sh"
+      command: "bash /mnt/ddev_config/rdg/theme-watch.sh start"
       directory: /var/www/html/drupal/web
 web_extra_exposed_ports:
     - name: theme-devserver

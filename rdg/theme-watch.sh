@@ -4,8 +4,15 @@
 # Long-running theme asset watcher, run as a DDEV web_extra_daemon.
 #
 # Replaces the dedicated node container these projects used to run under
-# docker-compose. Deliberately bundler-agnostic: it runs the repo's own
-# 'yarn start', so the choice of bundler is the repo's business.
+# docker-compose. Deliberately bundler-agnostic: it runs a script the repo
+# declares, so the choice of bundler is the repo's business.
+#
+# $1 is which script, derived and passed by 'ddev rdg-sync', because the fleet
+# uses two names for the same job. It defaults to 'start' so that a
+# config.platformsh.yaml generated before this argument existed keeps working:
+# DDEV never re-derives on an add-on upgrade, so those configs stay in the wild
+# until someone runs 'ddev rdg-sync' again.
+theme_script="${1:-start}"
 
 # The daemon's `directory` already sets this, but DDEV_DOCROOT makes the script
 # correct when run by hand too.
@@ -32,7 +39,7 @@ export CPPFLAGS="-DPNG_ARM_NEON_OPT=0"
 # a doomed start on top of it, burying the real install failure in the same log stream.
 yarn --network-concurrency 1 || { echo "theme-watch: dependency install failed" >&2; exit 1; }
 
-# exec, not a bare invocation: replaces this shell with the start process so DDEV's
+# exec, not a bare invocation: replaces this shell with the watcher process so DDEV's
 # process supervisor can signal it directly, rather than a wrapper shell that could
 # swallow the signal.
-exec yarn start
+exec yarn "$theme_script"

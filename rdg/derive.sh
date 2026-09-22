@@ -229,10 +229,12 @@ fi
 
 # --- theme asset build ------------------------------------------------------
 # A theme asset build is standard in our Drupal projects. Deliberately
-# bundler-agnostic: we run the repo's own 'yarn start', so switching webpack to
-# Vite needs no change here. The port is the only bundler-specific value, and it
-# is derived rather than assumed.
+# bundler-agnostic: we run the repo's own script, so switching bundler needs no
+# change here. Two things are bundler-specific -- which script name the repo uses
+# and which port its dev server listens on -- and both are derived rather than
+# assumed.
 theme_daemon="no"
+theme_script=""
 devserver_port=""
 package_json_rel=""
 if [ -n "$docroot" ]; then
@@ -241,18 +243,41 @@ if [ -n "$docroot" ]; then
     if ! jq -e 'type == "object"' "$root/$package_json_rel" >/dev/null 2>&1; then
       warn "$package_json_rel is not valid JSON or not a JSON object, not configuring the theme daemon"
     else
-      start_script="$(jq -r '.scripts.start // ""' "$root/$package_json_rel")"
-      # A whitespace-only script is not a usable command; treat it as absent.
-      start_script="$(printf '%s' "$start_script" | tr -d '[:space:]')"
-      if [ -n "$start_script" ]; then
+      # 'dev' before 'start'. Both names are in use across the fleet, and a repo
+      # carrying both is mid-migration onto the newer toolchain -- so the newer
+      # name is the one that reflects where the repo is going. Deliberately not a
+      # longer list: every further name is another way for the wrong script to be
+      # run as a daemon, and adding one is a one-line change when a repo needs it.
+      script_body=""
+      for candidate in dev start; do
+        body="$(candidate="$candidate" jq -r '.scripts[env.candidate] // ""' "$root/$package_json_rel")"
+        # A whitespace-only script is not a usable command; treat it as absent.
+        [ -n "$(printf '%s' "$body" | tr -d '[:space:]')" ] || continue
+        theme_script="$candidate"
+        script_body="$body"
+        break
+      done
+
+      if [ -n "$theme_script" ]; then
         theme_daemon="yes"
-        if [ "$(jq -r '[.dependencies, .devDependencies] | add // {} | has("vite")' "$root/$package_json_rel")" = "true" ]; then
+
+        # Two signals, because either alone misses a real repo in the fleet. A
+        # declared dependency misses a theme that gets Vite through a wrapper
+        # package (rdg-vite is ours, and depends on it) -- that repo would be
+        # handed 35729 while its dev server listens on 5173, so the port is
+        # exposed and nothing answers on it. The script text alone would miss a
+        # repo whose script runs a config file that invokes Vite. Reading the
+        # command we are about to run is the more direct question of the two.
+        uses_vite="$(jq -r '[.dependencies, .devDependencies] | add // {} | has("vite")' "$root/$package_json_rel")"
+        case "$script_body" in *vite*) uses_vite=true ;; esac
+
+        if [ "$uses_vite" = "true" ]; then
           devserver_port="5173"
         else
           devserver_port="35729"
         fi
       else
-        warn "$package_json_rel has no 'start' script, not configuring the theme daemon"
+        warn "$package_json_rel has no 'dev' or 'start' script, not configuring the theme daemon"
       fi
     fi
   fi
@@ -331,7 +356,7 @@ if [ "$theme_daemon" = "yes" ]; then
   cat <<EOF
 web_extra_daemons:
     - name: theme
-      command: "bash /mnt/ddev_config/rdg/theme-watch.sh"
+      command: "bash /mnt/ddev_config/rdg/theme-watch.sh $theme_script"
       directory: /var/www/html/$docroot
 web_extra_exposed_ports:
     - name: theme-devserver
