@@ -118,9 +118,10 @@ BOTH="upsun-db-pull:--skip-files:--skip-db upsun-files-pull:--skip-db:--skip-fil
     IFS=: read -r cmd _ _ <<< "$spec"
     pull_run "$cmd" staging
     printf '%s' "$output" | grep -qF "environment 'staging'"
-    # And says so when falling back to the project's pinned environment.
+    # And says so when falling back, naming both places the fallback can come from.
     pull_run "$cmd"
     printf '%s' "$output" | grep -qF 'pinned in .ddev/config.yaml'
+    printf '%s' "$output" | grep -qF 'from production if nothing is pinned'
   done
 }
 
@@ -367,6 +368,69 @@ assert_rejected() {
   for recipe in platform upsun; do
     ! grep -q '^db_push_command:' "$REPO_ROOT/providers/$recipe.yaml"
     ! grep -q '^files_push_command:' "$REPO_ROOT/providers/$recipe.yaml"
+  done
+}
+
+@test "with nothing pinned, both recipes pull from production, never the local branch" {
+  # Newer projects deploy production from 'main', older ones from 'master', so the
+  # only right default is to ask the project. DDEV's stock fallback -- the local git
+  # branch -- sends a feature branch or a worktree to an environment that usually
+  # does not exist, and resumes it when it does and is Inactive. Every command block
+  # runs in its own shell, so each has to resolve it for itself.
+  local recipe cli block active
+  for recipe in platform:platform upsun:upsun; do
+    IFS=: read -r recipe cli <<< "$recipe"
+    for block in auth_command db_pull_command files_import_command; do
+      active="$(yq -r ".$block.command" "$REPO_ROOT/providers/$recipe.yaml" | grep -v '^[[:space:]]*#')"
+      printf '%s\n' "$active" | grep -qF "$cli project:info default_branch" \
+        || { echo "$recipe $block: no default_branch fallback"; return 1; }
+      if printf '%s\n' "$active" | grep -qF 'git branch'; then
+        echo "$recipe $block: still falls back to the git branch"; return 1
+      fi
+    done
+  done
+}
+
+@test "the production fallback actually resolves, and only after the token is checked" {
+  # Driven, not grepped: the auth block is plain bash, so run it against a stub CLI
+  # that answers 'main' and confirm that is the environment it settles on. With no
+  # token it must stop at our own message before the CLI is ever called -- the
+  # stub records any call it gets, so a lookup ahead of the check fails here.
+  local recipe cli token bin="$BATS_TEST_TMPDIR/cli" calls="$BATS_TEST_TMPDIR/calls"
+  mkdir -p "$bin"
+  for recipe in platform:platform:PLATFORMSH_CLI_TOKEN upsun:upsun:UPSUN_CLI_TOKEN; do
+    IFS=: read -r recipe cli token <<< "$recipe"
+    cat > "$bin/$cli" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$calls"
+case "\$1" in
+  project:info)     echo main ;;
+  environment:info) echo active ;;
+esac
+STUB
+    chmod +x "$bin/$cli"
+    yq -r '.auth_command.command' "$REPO_ROOT/providers/$recipe.yaml" > "$BATS_TEST_TMPDIR/auth.sh"
+
+    rm -f "$calls"
+    run env -i PATH="$bin:/usr/bin:/bin" HOME="$BATS_TEST_TMPDIR" \
+      PLATFORM_PROJECT=abc123 "$token=t" bash "$BATS_TEST_TMPDIR/auth.sh"
+    [ "$status" -eq 0 ] || { echo "$recipe: $output"; return 1; }
+    printf '%s' "$output" | grep -qF 'Using PLATFORM_ENVIRONMENT=main'
+    grep -qx 'project:info default_branch --project=abc123' "$calls"
+
+    # A pinned environment is left alone: no lookup at all.
+    rm -f "$calls"
+    run env -i PATH="$bin:/usr/bin:/bin" HOME="$BATS_TEST_TMPDIR" \
+      PLATFORM_PROJECT=abc123 PLATFORM_ENVIRONMENT=staging "$token=t" bash "$BATS_TEST_TMPDIR/auth.sh"
+    printf '%s' "$output" | grep -qF 'Using PLATFORM_ENVIRONMENT=staging'
+    ! grep -q '^project:info' "$calls"
+
+    # No token: our message, and the CLI never called.
+    rm -f "$calls"
+    run env -i PATH="$bin:/usr/bin:/bin" HOME="$BATS_TEST_TMPDIR" \
+      PLATFORM_PROJECT=abc123 bash "$BATS_TEST_TMPDIR/auth.sh"
+    [ "$status" -ne 0 ]
+    [ ! -f "$calls" ] || { echo "$recipe: CLI called before the token check: $(cat "$calls")"; return 1; }
   done
 }
 

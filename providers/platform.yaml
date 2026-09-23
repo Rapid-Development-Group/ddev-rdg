@@ -74,14 +74,10 @@ auth_command:
   command: |
     set -eu -o pipefail
     # set -x   # You can enable bash debugging output by uncommenting
-    # Try explicit env, then derive from .platform/local/project.yaml and git branch.
+    # Try explicit env, then derive from .platform/local/project.yaml and the project's default branch.
     if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .platform/local/project.yaml ]; then
       PLATFORM_PROJECT="$(yq -r '.id' .platform/local/project.yaml 2>/dev/null || true)"
       export PLATFORM_PROJECT
-    fi
-
-    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-      export PLATFORM_ENVIRONMENT="$(git branch --show-current)"
     fi
 
     if [ -z "${PLATFORMSH_CLI_TOKEN:-}" ]; then echo "Please make sure you have set PLATFORMSH_CLI_TOKEN." && exit 1; fi
@@ -89,6 +85,17 @@ auth_command:
       echo "Please make sure you have set PLATFORM_PROJECT." && exit 1
     else
       echo "Using PLATFORM_PROJECT=${PLATFORM_PROJECT:-}"
+    fi
+    # Nothing pinned and no argument given: pull from production. On Upsun that is
+    # the project's default branch -- 'master' on older projects, 'main' on newer
+    # ones -- so ask the project rather than assuming either. Not the local git
+    # branch, which is DDEV's stock fallback: a feature branch or worktree then
+    # pulls an environment that usually does not exist, and when it does and is
+    # Inactive the resume below changes remote state nobody asked to change.
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+      PLATFORM_ENVIRONMENT="$(platform project:info default_branch --project="${PLATFORM_PROJECT}")"
+      export PLATFORM_ENVIRONMENT
+      echo "No environment pinned or given; using the project's production environment."
     fi
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
       echo "Please make sure you have set PLATFORM_ENVIRONMENT." && exit 1
@@ -109,7 +116,7 @@ db_pull_command:
     fi
 
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-      PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+      PLATFORM_ENVIRONMENT="$(platform project:info default_branch --project="${PLATFORM_PROJECT}")"
       export PLATFORM_ENVIRONMENT
     fi
 
@@ -147,7 +154,7 @@ files_import_command:
     fi
 
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-        PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+        PLATFORM_ENVIRONMENT="$(platform project:info default_branch --project="${PLATFORM_PROJECT}")"
         export PLATFORM_ENVIRONMENT
     fi
 

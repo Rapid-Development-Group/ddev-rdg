@@ -27,7 +27,8 @@ if [ -n "$RDG_PULL_ENV" ]; then
   printf "Pulling the public files from Upsun environment '%s'" "$RDG_PULL_ENV"
   printf ' (an inactive environment will be resumed).\n'
 else
-  printf 'Pulling the public files from the environment pinned in .ddev/config.yaml.\n'
+  printf 'Pulling the public files from the environment pinned in .ddev/config.yaml,\n'
+  printf 'or from production if nothing is pinned.\n'
 fi
 
 exec ddev "${args[@]}"

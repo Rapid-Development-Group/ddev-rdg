@@ -87,7 +87,7 @@ auth_command:
   command: |
     set -eu -o pipefail
     # set -x   # You can enable bash debugging output by uncommenting
-    # Try explicit env, then UPSUN_* fallback, then derive from .upsun/local/project.yaml and git branch.
+    # Try explicit env, then UPSUN_* fallback, then derive from .upsun/local/project.yaml and the project's default branch.
     export PLATFORM_PROJECT="${PLATFORM_PROJECT:-${UPSUN_PROJECT:-}}"
     if [ -z "${PLATFORM_PROJECT:-}" ] && [ -f .upsun/local/project.yaml ]; then
       PLATFORM_PROJECT="$(yq -r '.id' .upsun/local/project.yaml 2>/dev/null || true)"
@@ -95,10 +95,6 @@ auth_command:
     fi
 
     export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
-    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-      export PLATFORM_ENVIRONMENT="$(git branch --show-current)"
-    fi
-
     # The Upsun and Platform.sh CLIs are the same binary under two names, and an
     # Upsun account's API token authenticates both -- verified against this project
     # by running `upsun environment:list` with PLATFORMSH_CLI_TOKEN's value. So a
@@ -121,6 +117,17 @@ auth_command:
     else
       echo "Using PLATFORM_PROJECT=${PLATFORM_PROJECT:-}"
     fi
+    # Nothing pinned and no argument given: pull from production. On Upsun that is
+    # the project's default branch -- 'master' on older projects, 'main' on newer
+    # ones -- so ask the project rather than assuming either. Not the local git
+    # branch, which is DDEV's stock fallback: a feature branch or worktree then
+    # pulls an environment that usually does not exist, and when it does and is
+    # Inactive the resume below changes remote state nobody asked to change.
+    if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
+      PLATFORM_ENVIRONMENT="$(upsun project:info default_branch --project="${PLATFORM_PROJECT}")"
+      export PLATFORM_ENVIRONMENT
+      echo "No environment pinned or given; using the project's production environment."
+    fi
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
       echo "Please make sure you have set PLATFORM_ENVIRONMENT." && exit 1
     else
@@ -142,7 +149,7 @@ db_pull_command:
 
     export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-      PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+      PLATFORM_ENVIRONMENT="$(upsun project:info default_branch --project="${PLATFORM_PROJECT}")"
       export PLATFORM_ENVIRONMENT
     fi
 
@@ -192,7 +199,7 @@ files_import_command:
 
     export PLATFORM_ENVIRONMENT="${PLATFORM_ENVIRONMENT:-${UPSUN_ENVIRONMENT:-}}"
     if [ -z "${PLATFORM_ENVIRONMENT:-}" ]; then
-        PLATFORM_ENVIRONMENT="$(git branch --show-current)"
+        PLATFORM_ENVIRONMENT="$(upsun project:info default_branch --project="${PLATFORM_PROJECT}")"
         export PLATFORM_ENVIRONMENT
     fi
 

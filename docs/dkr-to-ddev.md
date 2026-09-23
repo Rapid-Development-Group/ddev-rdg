@@ -563,9 +563,9 @@ about the hosting config:
 # same site". Set one only if the directory cannot be named after the project.
 type: drupal11
 
-# For pulling. PLATFORM_PROJECT is deliberately absent -- see below.
+# For pulling. PLATFORM_PROJECT and PLATFORM_ENVIRONMENT are deliberately absent --
+# see below.
 web_environment:
-    - PLATFORM_ENVIRONMENT=master
     - PLATFORM_APP=<app name from .platform.app.yaml>
 
 webserver_type: nginx-fpm     # the generated nginx snippet is nginx syntax
@@ -581,8 +581,13 @@ expect a `PLATFORM_RELATIONSHIPS` blob that does not exist on your machine. Pull
 derives the project ID from `.platform/local/project.yaml` (Fixed) or
 `.upsun/local/project.yaml` (Flex) instead, so it is not needed.
 
-**`PLATFORM_ENVIRONMENT`** is worth pinning: the provider otherwise guesses the
-environment from your current git branch, which is never a real environment name locally.
+**Do not pin `PLATFORM_ENVIRONMENT` either, unless you mean it.** With nothing pinned,
+pulling asks Upsun for the project's production environment — its default branch, which
+is `master` on older projects and `main` on newer ones — so a new repo does the right
+thing without being told which. Pinning `master` out of habit is exactly how a `main`
+project ends up unable to pull. Pin it only for a repo that should pull from something
+other than production by default; `ddev upsun-db-pull <environment>` covers the one-off
+case.
 
 ## 3. Teach `settings.php` about DDEV
 
