@@ -162,9 +162,18 @@ Which provider is chosen comes from the tracked hosting config, never from
 a fresh clone has neither, and a converted repo keeps the *Fixed* one pointing at a
 dead project.
 
-With no argument neither command passes `--environment` at all, so whatever the project
-pins in its own `.ddev/config.yaml` applies — deliberately not hardcoded to `master`,
-since repos pin different environments.
+With no argument neither command passes `--environment` at all. Whatever the project
+pins as `PLATFORM_ENVIRONMENT` in its own `.ddev/config.yaml` applies, and with nothing
+pinned the provider asks Upsun for the project's **production environment** — its
+default branch, via `platform project:info default_branch`. That is `master` on older
+projects and `main` on newer ones, so neither is assumed, and a new repo needs to pin
+nothing to pull from production.
+
+This replaces DDEV's stock fallback, the *local* git branch. On a feature branch or a
+worktree that pulls an environment which usually does not exist, and when it does exist
+and is Inactive, the provider resumes it — a change to remote state nobody asked for.
+Pin `PLATFORM_ENVIRONMENT` only when a repo should pull from something other than
+production by default.
 
 Each command prints the environment it is about to pull from. DDEV's own confirmation
 prompt says only *"You're about to delete the current database and replace with the

@@ -43,9 +43,11 @@ if [ -n "$RDG_PULL_ENV" ]; then
   printf ' (an inactive environment will be resumed).\n'
 else
   # With no argument no --environment is passed at all, so the environment pinned in
-  # the project's own .ddev/config.yaml applies. Not hardcoded to 'master' here:
-  # different repos in the fleet pin different environments.
-  printf 'Pulling the database from the environment pinned in .ddev/config.yaml.\n'
+  # the project's own .ddev/config.yaml applies, and with nothing pinned the provider
+  # asks Upsun for the project's production environment. Neither step assumes
+  # 'master': newer projects deploy production from 'main'.
+  printf 'Pulling the database from the environment pinned in .ddev/config.yaml,\n'
+  printf 'or from production if nothing is pinned.\n'
 fi
 
 # No -y: replacing the local database is worth one keypress.
