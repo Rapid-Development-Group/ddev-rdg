@@ -111,7 +111,9 @@ shipped_files() {
 }
 
 @test "the static config wires the guard as a pre-start exec-host task" {
-  [ "$(yq -r '.hooks["pre-start"] | length' "$STATIC_CONFIG")" = "1" ]
+  # Two tasks, the guard first: a drifted project aborts before op-secrets asks
+  # for a 1Password unlock it is not going to use.
+  [ "$(yq -r '.hooks["pre-start"] | length' "$STATIC_CONFIG")" = "2" ]
   # exec-host, not exec: the guard runs on the host precisely because the project
   # may be down, which is when there is no container to exec into.
   [ "$(yq -r '.hooks["pre-start"][0]["exec-host"]' "$STATIC_CONFIG")" = "bash .ddev/rdg/check-sync.sh ." ]

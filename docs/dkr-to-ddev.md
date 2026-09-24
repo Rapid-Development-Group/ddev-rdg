@@ -97,7 +97,7 @@ livereload too.
 **2. Install DDEV.**
 
 ```sh
-brew install ddev/ddev/ddev     # the add-on needs >= 1.24.8
+brew install ddev/ddev/ddev     # the add-on needs >= 1.25.4
 mkcert -install                 # once, ever — makes local https trusted by your browser
 ```
 
@@ -190,6 +190,13 @@ is no hosted environment to pull from.
 There is **no separate theme build step**. `ddev start` runs the asset watcher as a
 daemon, which installs dependencies and does a full compile before it begins watching —
 which is why the first `ddev start` after a clone takes longer than later ones.
+
+**Secrets.** If the site uses 1Password (`op://` references in `.ddev/secrets.env` or
+in a dkr-era `.env`), `ddev start` resolves them for you, the way `dkr up` did. It
+needs the 1Password CLI (`brew install 1password-cli`) with the app's CLI integration
+turned on. If it can't reach 1Password it warns and starts anyway. Run
+`ddev op-secrets && ddev restart` once you've fixed whatever it named. See the README's
+"Secrets from 1Password" for details.
 
 ## Two checkouts of the same site
 
@@ -572,7 +579,7 @@ webserver_type: nginx-fpm     # the generated nginx snippet is nginx syntax
 xdebug_enabled: false
 use_dns_when_possible: true
 composer_version: "2"
-ddev_version_constraint: ">= 1.24.8"
+ddev_version_constraint: ">= 1.25.4"
 ```
 
 **Do not set `PLATFORM_PROJECT`.** Drupal's `settings.php` typically gates
@@ -621,6 +628,12 @@ Production Redis versions are old enough that pinning to match is not worth it.
 
 DDEV maintains its own `.ddev/.gitignore` for the files it generates, so `git add .ddev`
 is safe.
+
+**Secrets need nothing from you if they're already `op://` references in `.env`.** The
+add-on reads them from there on every start. When `dkr` goes away, move those lines
+into a committed `.ddev/secrets.env` before deleting `.env`. A value that is a *real*
+secret sitting in `.env` or `docker-compose.yml` belongs in the vault first: see the
+Keeping Secrets standard.
 
 ## 6. Verify, then leave `dkr` in place
 
@@ -946,6 +959,10 @@ with `additional_hostnames` it yields `https://a,b:10101`, which curl rejects.
 
 Verify with a real upload rather than by reading config — add a media image in the admin
 UI and confirm it renders.
+
+**Secrets** work as in Part 2: `op://` references in `.env` are picked up on every
+start, and move to a committed `.ddev/secrets.env` when `dkr` goes away. See
+[step 5 of Part 2](#5-gitignore-what-the-tooling-now-generates).
 
 ## 7. Verify, then leave `dkr` in place
 
