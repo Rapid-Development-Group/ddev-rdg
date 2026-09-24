@@ -68,7 +68,9 @@ line2'
   secret app/site/key 'k1'
   printf 'API_KEY="op://app/site/key"\n' > "$PROJ/.ddev/secrets.env"
   bash "$SCRIPT" "$PROJ"
-  [ "$(stat -f %Lp "$OUT" 2>/dev/null || stat -c %a "$OUT")" = 600 ]
+  # find, not stat: GNU `stat -f` means filesystem status and succeeds, so a
+  # BSD-first `stat -f || stat -c` fallback never falls back on Linux.
+  [ -n "$(find "$OUT" -perm 600)" ]
 }
 
 @test "signed out, in the hook, with no previous file: warns and starts anyway" {
