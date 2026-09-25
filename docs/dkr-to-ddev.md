@@ -195,8 +195,9 @@ which is why the first `ddev start` after a clone takes longer than later ones.
 in a dkr-era `.env`), `ddev start` resolves them for you, the way `dkr up` did. It
 needs the 1Password CLI (`brew install 1password-cli`) with the app's CLI integration
 turned on. If it can't reach 1Password it warns and starts anyway. Run
-`ddev op-secrets && ddev restart` once you've fixed whatever it named. See the README's
-"Secrets from 1Password" for details.
+`ddev 1pass-secrets && ddev restart` once you've fixed whatever it named. This comes from
+the [ddev-1pass](https://github.com/Rapid-Development-Group/ddev-1pass) add-on, which ddev-rdg
+installs for you. Its README has the details.
 
 ## Two checkouts of the same site
 
@@ -629,8 +630,8 @@ Production Redis versions are old enough that pinning to match is not worth it.
 DDEV maintains its own `.ddev/.gitignore` for the files it generates, so `git add .ddev`
 is safe.
 
-**Secrets need nothing from you if they're already `op://` references in `.env`.** The
-add-on reads them from there on every start. When `dkr` goes away, move those lines
+**Secrets need nothing from you if they're already `op://` references in `.env`.**
+ddev-1pass, which installing ddev-rdg brings along, reads them from there on every start. When `dkr` goes away, move those lines
 into a committed `.ddev/secrets.env` before deleting `.env`. A value that is a *real*
 secret sitting in `.env` or `docker-compose.yml` belongs in the vault first: see the
 Keeping Secrets standard.
@@ -1136,6 +1137,22 @@ it filled Docker's disk and failed `ddev start` outright with `no space left on 
 Mongo runs as its own service instead, since DDEV has no Mongo type. `movetrac` uses MySQL
 and keeps DDEV's `db`, pointing the app at it with `DB_HOST=db` — no source change, because
 that value already came from the environment.
+
+## Secrets from 1Password
+
+`dkr up` resolved `op://` references for every repo, and that isn't lost by leaving
+ddev-rdg out. Install [ddev-1pass](https://github.com/Rapid-Development-Group/ddev-1pass) on
+its own:
+
+```sh
+ddev add-on get Rapid-Development-Group/ddev-1pass
+```
+
+Here the secrets usually belong to a backend service, not `web`, so put each service's
+references in its own committed file, named after the **compose service**:
+`.ddev/secrets.backend.env` feeds the `backend` container. That's one more reason to
+keep the service names, as the next section explains. Every `ddev start` resolves
+them, and never fails the start over them.
 
 ## Keep the compose service names
 
