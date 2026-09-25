@@ -20,8 +20,3 @@ corepack_enable: true
 hooks:
   pre-start:
     - exec-host: "bash .ddev/rdg/check-sync.sh ."
-    # Resolves 1Password references into .ddev/.env.web.op.local on every start, as
-    # 'dkr up' did -- but never fails the start (see the script). Pre-start runs
-    # before DDEV reads the .env.* files, so a refresh applies to this same start.
-    # A no-op in a repo with no op:// references.
-    - exec-host: "bash .ddev/rdg/op-secrets.sh . --hook"

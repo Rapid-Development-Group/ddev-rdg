@@ -202,42 +202,13 @@ Delete those blocks first.
 
 ### Secrets from 1Password
 
-Every `ddev start` resolves the repo's 1Password references into
-`.ddev/.env.web.op.local`, which DDEV loads into the web container. That's what
-`dkr up` did through `op run`. The references come from the first of these that exists:
-
-- `.ddev/secrets.env`: committed, one `NAME="op://vault/item/field"` per line. Use
-  this for any repo without `dkr`.
-- `.env`: a dkr-era repo's own file. Only its `op://` lines are used, so dkr's
-  `DB_HOST` and `*_TAG` values never reach the container.
-
-A repo with neither gets no 1Password step at all, and `op` is never called.
-
-**It never blocks the start.** If `op` is missing, signed out or offline, the start
-prints a warning and keeps going: with the last good file if there is one, with no
-secrets if not. `ddev op-secrets` is the strict version, useful for refreshing without
-a restart or for seeing the full error:
-
-    ddev op-secrets && ddev restart
-
-Signing in is the 1Password app's CLI integration (Settings → Developer), so a start
-costs one Touch ID prompt per terminal session.
-
-**Why a file and not memory, the way `dkr` did it.** A hook runs as a child of
-`ddev`, so it can't set variables in the process that later runs `docker compose up`.
-Wrapping `op run -- ddev start` would miss every other way DDEV recreates the
-containers, such as `ddev restart`, `ddev start -a` or an add-on install, and each of
-those would bring the site up with its secrets silently empty. The file is mode 600,
-written atomically, gitignored by DDEV (the `.local` suffix), and deleted when the
-add-on is removed. With `dkr` the values sat in the container's config, readable
-through `docker inspect`, and that is still true here.
-
-Values are written out escaped for DDEV's dotenv parser, so a `$`, a quote or a
-multi-line PEM key arrives exactly as stored. `op inject`'s output would pass them
-through raw instead. To keep AI agents from reading the file, add a deny rule to the
-repo's `.claude/settings.json`: `"permissions": {"deny": ["Read(./.ddev/.env.web.op.local)"]}`.
-That covers the file tools but not a shell `cat`, so treat it as a guard rail, not a
-wall.
+Every `ddev start` resolves the repo's `op://` references into env files that DDEV
+loads into the containers, the way `dkr up` did through `op run`. It never blocks the
+start. That lives in its own add-on,
+[ddev-1pass](https://github.com/Rapid-Development-Group/ddev-1pass), which installing this
+one installs too. See its README for where the references go and how failures behave.
+DDEV skips a dependency that is already installed, so upgrade ddev-1pass on its own:
+`ddev add-on get Rapid-Development-Group/ddev-1pass`.
 
 ### Running several checkouts of one repo at once
 

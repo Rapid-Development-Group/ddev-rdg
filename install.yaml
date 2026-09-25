@@ -2,6 +2,12 @@ name: rdg
 
 ddev_version_constraint: '>= 1.25.4'
 
+# 1Password secrets on every start, as 'dkr up' had. Its own add-on so that repos
+# which don't want this one (the Node apps) can still have it. DDEV installs it
+# with this one, but skips it when it's already there: upgrade it on its own.
+dependencies:
+  - Rapid-Development-Group/ddev-1pass
+
 project_files:
   - rdg/
   - config.rdg.yaml
@@ -10,7 +16,6 @@ project_files:
   - commands/host/rdg-sync
   - commands/host/upsun-db-pull
   - commands/host/upsun-files-pull
-  - commands/host/op-secrets
   - web-build/Dockerfile.rdg-theme-toolchain
 
 post_install_actions:
@@ -22,7 +27,6 @@ post_install_actions:
     chmod +x commands/host/rdg-sync
     chmod +x commands/host/upsun-db-pull
     chmod +x commands/host/upsun-files-pull
-    chmod +x commands/host/op-secrets
   - |
     #ddev-nodisplay
     # Upgrade cleanup. Until v1.5.0 'ddev rdg-sync' GENERATED
@@ -73,9 +77,3 @@ removal_actions:
     # Guarded, unlike the two above: 'ddev redis-backend' writes this same file
     # without the marker, and that one is the developer's, not ours.
     if [ -f .env.redis ] && grep -q '#ddev-generated' .env.redis; then rm -f .env.redis; fi
-  - |
-    #ddev-nodisplay
-    # The resolved 1Password secrets. Left behind, DDEV would go on loading every API
-    # key into the container with nothing in the project explaining where they came
-    # from. Ours by its label: a developer's own .env.web.local is untouched.
-    rm -f .env.web.op.local

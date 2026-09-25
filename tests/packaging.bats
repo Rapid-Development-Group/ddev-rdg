@@ -111,9 +111,7 @@ shipped_files() {
 }
 
 @test "the static config wires the guard as a pre-start exec-host task" {
-  # Two tasks, the guard first: a drifted project aborts before op-secrets asks
-  # for a 1Password unlock it is not going to use.
-  [ "$(yq -r '.hooks["pre-start"] | length' "$STATIC_CONFIG")" = "2" ]
+  [ "$(yq -r '.hooks["pre-start"] | length' "$STATIC_CONFIG")" = "1" ]
   # exec-host, not exec: the guard runs on the host precisely because the project
   # may be down, which is when there is no container to exec into.
   [ "$(yq -r '.hooks["pre-start"][0]["exec-host"]' "$STATIC_CONFIG")" = "bash .ddev/rdg/check-sync.sh ." ]
@@ -302,4 +300,8 @@ shipped_files() {
   printf 'name: "demo"\ntype: drupal11\n' > "$proj/.ddev/config.yaml"
   bash "$REPO_ROOT/rdg/mailpit-hostname.sh" "$proj/.ddev"
   [ "$(yq -r '.additional_hostnames[0]' "$proj/.ddev/config.mailpit.yaml")" = "mailpit.demo" ]
+}
+
+@test "installing brings ddev-1pass, for dkr's 1Password secrets on every start" {
+  yq -r '.dependencies[]' "$INSTALL" | grep -qxF 'Rapid-Development-Group/ddev-1pass'
 }
